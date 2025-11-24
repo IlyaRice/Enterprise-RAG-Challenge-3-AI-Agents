@@ -1,4 +1,5 @@
 import time
+import concurrent.futures
 from langfuse import get_client
 from typing import List, Union
 import json
@@ -46,6 +47,15 @@ def append_basket_state_if_needed(job_function, benchmark_client, benchmark: str
         return f"{original_txt}\n\nBasket contents:\n[Error fetching basket: {error_msg}. Please use Req_ViewBasket manually to verify.]"
     except Exception as e:
         return f"{original_txt}\n\nBasket contents:\n[Error fetching basket: {str(e)}. Please use Req_ViewBasket manually to verify.]"
+
+def dispatch_with_timeout(benchmark_client, function, timeout_seconds=30):
+    """Execute SDK dispatch with timeout protection."""
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(benchmark_client.dispatch, function)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(f"SDK operation timed out after {timeout_seconds} seconds")
 
 observe()
 def get_next_step(next_step_schema: BaseModel, log: List[dict]) -> Union[NextStepStore, NextStepDemo]:
@@ -170,10 +180,14 @@ def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:
 
         # now execute the tool by dispatching command to our handler
         try:
-            result = benchmark_client.dispatch(job.function)
+            result = dispatch_with_timeout(benchmark_client, job.function)
             txt = result.model_dump_json(exclude_none=True, exclude_unset=True)
             if config.VERBOSE:
                 print(f"OUT: {txt}")
+        except TimeoutError as e:
+            txt = f'{{"error": "{str(e)}"}}'
+            if config.VERBOSE:
+                print(f"ERR: {str(e)}")
         except ApiException as e:
             txt = e.detail
             if config.VERBOSE:
