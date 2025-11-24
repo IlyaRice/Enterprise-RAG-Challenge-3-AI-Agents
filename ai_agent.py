@@ -57,6 +57,110 @@ def dispatch_with_timeout(benchmark_client, function, timeout_seconds=30):
         except concurrent.futures.TimeoutError:
             raise TimeoutError(f"SDK operation timed out after {timeout_seconds} seconds")
 
+def execute_batch(functions_list, benchmark_client, benchmark: str) -> str:
+    """
+    Execute a batch of functions serially with fail-fast error handling.
+    Returns formatted string with all request/response pairs until completion or error.
+    """
+    results = []
+    total_functions = len(functions_list)
+    
+    for idx, function in enumerate(functions_list, 1):
+        # Format the request
+        request_json = function.model_dump_json()
+        
+        # Execute the function
+        try:
+            result = dispatch_with_timeout(benchmark_client, function)
+            response_json = result.model_dump_json(exclude_none=True, exclude_unset=True)
+            
+            # Auto-append basket state if applicable
+            response_with_basket = append_basket_state_if_needed(function, benchmark_client, benchmark, response_json)
+            
+            # Add to results
+            results.append(f"Request:\n`{request_json}`\n\nResponse:\n`{response_with_basket}`")
+            
+        except TimeoutError as e:
+            error_json = f'{{"error": "{str(e)}"}}'
+            results.append(f"Request:\n`{request_json}`\n\nResponse:\n`{error_json}`")
+            
+            # Add abort message
+            if idx < total_functions:
+                results.append(f"\nThe rest of requests are aborted due to the error.\nExecuted: {idx} out of {total_functions} requested operations.")
+            break
+            
+        except ApiException as e:
+            results.append(f"Request:\n`{request_json}`\n\nResponse:\n`{e.detail}`")
+            
+            # Add abort message
+            if idx < total_functions:
+                results.append(f"\nThe rest of requests are aborted due to the error.\nExecuted: {idx} out of {total_functions} requested operations.")
+            break
+    
+    # Join all results with separators
+    return "\n\n---\n\n".join(results)
+
+def handle_task_completion(function, task: TaskInfo, erc_client: ERC3, verbose: bool) -> dict:
+    """
+    Handle CompleteTask or RefuseTask terminal actions and return final result.
+    """
+    # Determine success/failure and extract details
+    if isinstance(function, CompleteTask):
+        code = "completed"
+        summary_text = function.summary
+        details = function.completed_steps
+        if verbose:
+            print(f"Agent completed successfully. Summary: {summary_text}")
+            print("\n".join(details))
+    else:  # RefuseTask
+        code = "failed"
+        summary_text = function.summary
+        details = function.attempted_solutions
+        if verbose:
+            print(f"Agent refused task. Reason: {summary_text}")
+            print("\n".join(details))
+
+    # Complete task and get evaluation
+    completion = erc_client.complete_task(task)
+    
+    score = completion.eval.score if completion.eval else None
+    eval_logs = completion.eval.logs if completion.eval else None
+    
+    lf = get_client()
+    lf.score_current_span(name="score", value=score, data_type="NUMERIC", comment=eval_logs)
+
+    return {
+        "task_id": task.task_id,
+        "task_text": task.task_text,
+        "code": code,
+        "summary": [summary_text] + details,
+        "score": score,
+        "eval_logs": eval_logs
+    }
+
+def execute_single_call(function, benchmark_client, benchmark: str, verbose: bool) -> str:
+    """
+    Execute a single tool call and return formatted text for logging.
+    """
+    try:
+        result = dispatch_with_timeout(benchmark_client, function)
+        txt = result.model_dump_json(exclude_none=True, exclude_unset=True)
+        if verbose:
+            print(f"OUT: {txt}")
+    except TimeoutError as e:
+        txt = f'{{"error": "{str(e)}"}}'
+        if verbose:
+            print(f"ERR: {str(e)}")
+    except ApiException as e:
+        txt = e.detail
+        if verbose:
+            print(f"ERR: {e.api_error.error}")
+
+    # Automatically append basket state after state-changing operations
+    txt = append_basket_state_if_needed(function, benchmark_client, benchmark, txt)
+    
+    return txt
+
 observe()
 def get_next_step(next_step_schema: BaseModel, log: List[dict]) -> Union[NextStepStore, NextStepDemo]:
     
@@ -137,69 +241,52 @@ def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:
 
         job = get_next_step(next_step_schema, log)
 
-        # if agent wants to finish, then quit loop
-        if isinstance(job.function, (CompleteTask, RefuseTask)):
-            # Determine success/failure and extract details
-            if isinstance(job.function, CompleteTask):
-                code = "completed"
-                summary_text = job.function.summary
-                details = job.function.completed_steps
-                if config.VERBOSE:
-                    print(f"Agent completed successfully. Summary: {summary_text}")
-                    print("\n".join(details))
-            else:  # RefuseTask
-                code = "failed"
-                summary_text = job.function.summary
-                details = job.function.attempted_solutions
-                if config.VERBOSE:
-                    print(f"Agent refused task. Reason: {summary_text}")
-                    print("\n".join(details))
-
-            # Complete task and get evaluation
-            completion = erc_client.complete_task(task)
+        # Check if this is a single call or batch call
+        if job.call.call_mode == "single":
+            # Single mode execution
+            function_to_execute = job.call.function
             
-            score = completion.eval.score if completion.eval else None
-            eval_logs = completion.eval.logs if completion.eval else None
+            # Handle terminal actions (CompleteTask, RefuseTask)
+            if isinstance(function_to_execute, (CompleteTask, RefuseTask)):
+                return handle_task_completion(function_to_execute, task, erc_client, config.VERBOSE)
             
-            lf=get_client()
-            lf.score_current_span(name="score", value=score, data_type="NUMERIC", comment=eval_logs)
-
-            return {
-                "task_id": task.task_id,
-                "task_text": task.task_text,
-                "code": code,
-                "summary": [summary_text] + details,
-                "score": score,
-                "eval_logs": eval_logs
-            }
-        
-        # print next step for debugging
-        next_planned_step = job.next_actions[0] if job.next_actions else "No plan provided"
-        if config.VERBOSE:
-            print(f"{next_planned_step}", f"\n  {job.function}")
-
-        # now execute the tool by dispatching command to our handler
-        try:
-            result = dispatch_with_timeout(benchmark_client, job.function)
-            txt = result.model_dump_json(exclude_none=True, exclude_unset=True)
+            # Regular single tool execution
+            next_planned_step = job.next_actions[0] if job.next_actions else "No plan provided"
             if config.VERBOSE:
-                print(f"OUT: {txt}")
-        except TimeoutError as e:
-            txt = f'{{"error": "{str(e)}"}}'
-            if config.VERBOSE:
-                print(f"ERR: {str(e)}")
-        except ApiException as e:
-            txt = e.detail
-            if config.VERBOSE:
-                print(f"ERR: {e.api_error.error}")
+                print(f"{next_planned_step}", f"\n  {function_to_execute}")
 
-        # Automatically append basket state after state-changing operations
-        txt = append_basket_state_if_needed(job.function, benchmark_client, benchmark, txt)
+            # Execute the tool
+            txt = execute_single_call(function_to_execute, benchmark_client, benchmark, config.VERBOSE)
 
-        log.append({
-            "role": "assistant",
-            "content": f'Planned step:\n"{next_planned_step}"\n\nRequest:\n`{job.function.model_dump_json()}`\n\nResponse:\n`{txt}`'
-        })
+            # Add to conversation log
+            log.append({
+                "role": "assistant",
+                "content": f'Planned step:\n"{next_planned_step}"\n\nRequest:\n`{function_to_execute.model_dump_json()}`\n\nResponse:\n`{txt}`'
+            })
+            
+        elif job.call.call_mode == "batch":
+            # Batch mode execution
+            functions_to_execute = job.call.functions
+            
+            # Print debug info
+            next_planned_step = job.next_actions[0] if job.next_actions else "No plan provided"
+            if config.VERBOSE:
+                print(f"{next_planned_step}")
+                print(f"  BATCH MODE: Executing {len(functions_to_execute)} functions")
+                for idx, func in enumerate(functions_to_execute, 1):
+                    print(f"    {idx}. {func}")
+
+            # Execute batch
+            txt = execute_batch(functions_to_execute, benchmark_client, benchmark)
+            
+            if config.VERBOSE:
+                print(f"BATCH OUT: {len(functions_to_execute)} operations completed/attempted")
+
+            # Add to conversation log
+            log.append({
+                "role": "assistant",
+                "content": f'Planned step:\n"{next_planned_step}"\n\n{txt}'
+            })
     
     # Timeout - complete task anyway
     completion = erc_client.complete_task(task)
