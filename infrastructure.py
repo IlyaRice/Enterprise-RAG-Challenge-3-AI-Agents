@@ -46,6 +46,32 @@ class AgentStepLimitError(AgentError):
 
 
 # ============================================================================
+# TASK CONTEXT
+# ============================================================================
+# Holds task-scoped state (erc_client, task_id, model) for logging LLM usage.
+
+class TaskContext:
+    """
+    Context object for task-scoped operations.
+    
+    Passed through the call chain to enable log_llm calls at each LLM invocation.
+    """
+    def __init__(self, erc_client, task_id: str, model: str):
+        self.erc_client = erc_client
+        self.task_id = task_id
+        self.model = model
+    
+    def log_llm(self, duration_sec: float, usage):
+        """Log LLM usage to ERC3 platform."""
+        self.erc_client.log_llm(
+            task_id=self.task_id,
+            model=self.model,
+            duration_sec=duration_sec,
+            usage=usage
+        )
+
+
+# ============================================================================
 # OPENAI CLIENT INITIALIZATION
 # ============================================================================
 # Single place for LLM client setup. Easy to change provider/model globally.
@@ -176,6 +202,7 @@ def get_next_step(
     next_step_schema: BaseModel,
     system_prompt: str,
     conversation: List[dict],
+    task_ctx: "TaskContext" = None,
 ) -> dict:
     """
     Get next step from LLM using the provided schema.
@@ -188,6 +215,7 @@ def get_next_step(
         next_step_schema: Pydantic model for structured output
         system_prompt: System prompt (stored separately in trace)
         conversation: List of user/assistant messages (WITHOUT system prompt)
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         dict with:
@@ -223,6 +251,10 @@ def get_next_step(
                 gen.update(metadata={"reasoning": reasoning, "attempt": attempt + 1})
             
             llm_duration = time.time() - llm_start
+            
+            # Log LLM usage to ERC3 platform
+            if task_ctx:
+                task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
             
             content = response.choices[0].message.content
             parsed = next_step_schema.model_validate_json(content)

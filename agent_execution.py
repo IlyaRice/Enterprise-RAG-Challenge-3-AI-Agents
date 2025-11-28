@@ -28,6 +28,8 @@ from infrastructure import (
     execute_single_call, execute_batch,
     # Conversation utilities
     build_subagent_context, format_subagent_result, inject_plan,
+    # Task context for LLM logging
+    TaskContext,
     # Errors
     AgentStepLimitError,
 )
@@ -54,7 +56,7 @@ from subagent_prompts import (
 # They do NOT go through the unified loop.
 
 @observe()
-def run_task_analyzer(task_text: str, trace: List[dict]) -> str:
+def run_task_analyzer(task_text: str, trace: List[dict], task_ctx: TaskContext = None) -> str:
     """
     Preprocess task to expand implicit requirements before orchestration.
     
@@ -64,6 +66,7 @@ def run_task_analyzer(task_text: str, trace: List[dict]) -> str:
     Args:
         task_text: Raw task text from user
         trace: Trace list to append events to
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         The tldr_rephrased_task from structured analysis.
@@ -86,6 +89,10 @@ def run_task_analyzer(task_text: str, trace: List[dict]) -> str:
         },
     )
     llm_duration = time.time() - llm_start
+    
+    # Log LLM usage to ERC3 platform
+    if task_ctx:
+        task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
     
     # Parse structured response
     parsed = TaskAnalysisResponse.model_validate_json(response.choices[0].message.content)
@@ -116,7 +123,8 @@ def run_bullshit_caller(
     terminal_action: Union[CompleteTask, RefuseTask],
     parent_node_id: str,
     sibling_count: int,
-    trace: List[dict]
+    trace: List[dict],
+    task_ctx: TaskContext = None,
 ) -> dict:
     """
     Validate a CompleteTask/RefuseTask terminal action.
@@ -131,6 +139,7 @@ def run_bullshit_caller(
         parent_node_id: Parent's node_id for tree structure
         sibling_count: Number of siblings at this level (for node_id generation)
         trace: Trace list to append events to
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         Dict with keys:
@@ -177,6 +186,11 @@ Validate this terminal action. Is the agent actually done, or are they bullshitt
         )
         
         llm_duration = time.time() - llm_start
+        
+        # Log LLM usage to ERC3 platform
+        if task_ctx:
+            task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
+        
         content = response.choices[0].message.content
         parsed = BullshitCallerResponse.model_validate_json(content)
         reasoning = getattr(response.choices[0].message, 'reasoning', None)
@@ -285,6 +299,7 @@ def execute_meta_tool(
     benchmark_client,
     trace: List[dict],
     parent_node_id: str,
+    task_ctx: TaskContext = None,
 ) -> dict:
     """
     Execute a meta-tool by spawning a sub-agent.
@@ -297,6 +312,7 @@ def execute_meta_tool(
         benchmark_client: SDK client for sub-agent to use
         trace: Trace list to append events to
         parent_node_id: Orchestrator's node ID (e.g., "2")
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         dict with subagent_name, status, report
@@ -318,6 +334,7 @@ def execute_meta_tool(
         trace=trace,
         parent_node_id=parent_node_id,
         orchestrator_log=None,  # Subagents don't pass this down
+        task_ctx=task_ctx,
     )
     
     return {
@@ -339,6 +356,7 @@ def handle_terminal_with_validation(
     validation_count: int,
     max_validations: int,
     trace: List[dict],
+    task_ctx: TaskContext = None,
 ) -> dict:
     """
     Handle terminal action with optional BullshitCaller validation.
@@ -351,6 +369,7 @@ def handle_terminal_with_validation(
         validation_count: How many validations have failed so far
         max_validations: Maximum before forcing termination
         trace: Trace list to append events to
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         dict with:
@@ -366,7 +385,8 @@ def handle_terminal_with_validation(
         terminal_action=terminal_action,
         parent_node_id=node_id,
         sibling_count=0,  # BullshitCaller is always first child of terminal node
-        trace=trace
+        trace=trace,
+        task_ctx=task_ctx,
     )
     
     is_limit_reached = validation_count >= max_validations - 1
@@ -402,6 +422,7 @@ def run_agent_loop(
     trace: List[dict],
     parent_node_id: str,
     orchestrator_log: List[dict] | None = None,
+    task_ctx: TaskContext = None,
 ) -> dict:
     """
     THE unified agent loop that works for both orchestrator and subagents.
@@ -420,6 +441,7 @@ def run_agent_loop(
         trace: Trace list to append events to
         parent_node_id: Parent's node ID ("0" for orchestrator, "N" for subagent under step N)
         orchestrator_log: Orchestrator's full log (only for orchestrator, None for subagents)
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
         dict with status, report (and for orchestrator: orchestrator_log)
@@ -460,7 +482,7 @@ def run_agent_loop(
     # Main loop
     for i in range(max_steps):
         # Get LLM decision
-        llm_result = get_next_step(schema, system_prompt, conversation)
+        llm_result = get_next_step(schema, system_prompt, conversation, task_ctx=task_ctx)
         job = llm_result["parsed"]
         latest_plan = getattr(job, 'remaining_work', None)
         
@@ -505,6 +527,7 @@ def run_agent_loop(
                 validation_count=validation_count,
                 max_validations=max_validations,
                 trace=trace,
+                task_ctx=task_ctx,
             )
             
             if validation_result["should_terminate"]:
@@ -561,6 +584,7 @@ def run_agent_loop(
                 benchmark_client=benchmark_client,
                 trace=trace,
                 parent_node_id=node_id,
+                task_ctx=task_ctx,
             )
             
             # Log the orchestrator LLM call with subagent_result attached

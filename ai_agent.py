@@ -23,6 +23,8 @@ from erc3 import TaskInfo, ERC3
 # Import from infrastructure
 from infrastructure import (
     AgentStepLimitError,
+    TaskContext,
+    LLM_MODEL,
 )
 
 # Import from agent_types
@@ -92,6 +94,7 @@ def handle_task_completion(
 
     result = {
         "task_id": task.task_id,
+        "task_index": task.num,
         "task_text": task.task_text,
         "benchmark": benchmark,
         "trace": trace,
@@ -130,11 +133,14 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
     # Initialize trace for collecting events
     trace = []
     
+    # Create TaskContext for LLM usage logging
+    task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL)
+    
     if config.VERBOSE:
         print(f"\nTask: {task.task_text}\n")
     
     # Preprocess task to expand requirements (node_id="0", depth=-1)
-    expanded_task = run_task_analyzer(task.task_text, trace)
+    expanded_task = run_task_analyzer(task.task_text, trace, task_ctx=task_ctx)
     
     # Get orchestrator config
     orchestrator_config = AGENT_REGISTRY["Orchestrator"]
@@ -155,6 +161,7 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
             trace=trace,
             parent_node_id="0",  # Orchestrator is child of TaskAnalyzer
             orchestrator_log=orchestrator_log,
+            task_ctx=task_ctx,
         )
         
         # Create terminal action for handle_task_completion
@@ -183,12 +190,13 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
         
         return {
             "task_id": task.task_id,
+            "task_index": task.num,
             "task_text": task.task_text,
             "benchmark": "store",
             "trace": trace,
             "orchestrator_log": orchestrator_log,
             "code": "timeout",
-            "summary": ["Orchestrator exceeded maximum steps limit"],
+            "summary": "Orchestrator exceeded maximum steps limit",
             "score": score,
             "eval_logs": eval_logs
         }
