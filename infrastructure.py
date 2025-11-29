@@ -95,22 +95,22 @@ def next_node_id(parent_id: str | None, sibling_count: int) -> str:
     Generate hierarchical node ID for trace tree structure.
     
     Args:
-        parent_id: Parent node's ID (None for TaskAnalyzer, "0" for orchestrator children)
+        parent_id: Parent node's ID (None for virtual root, "0" for orchestrator children)
         sibling_count: Number of siblings already created under this parent (0-indexed)
     
     Returns:
-        Node ID string like "0" (TaskAnalyzer), "1", "2" (orchestrator), 
-        "2.1", "2.2" (subagent), "2.2.1" (BullshitCaller)
+        Node ID string like "1", "2" (orchestrator), "2.1", "2.2" (subagent), 
+        "2.2.1" (validator)
     
     Examples:
-        next_node_id(None, 0) -> "0"        # TaskAnalyzer (first and only root)
+        next_node_id(None, 0) -> "0"        # Virtual root (unused)
         next_node_id("0", 0) -> "1"         # First orchestrator step
         next_node_id("0", 1) -> "2"         # Second orchestrator step
         next_node_id("2", 0) -> "2.1"       # First subagent step under orch step 2
-        next_node_id("2.3", 0) -> "2.3.1"   # BullshitCaller under subagent step 2.3
+        next_node_id("2.3", 0) -> "2.3.1"   # Validator under subagent step 2.3
     """
     if parent_id is None:
-        return "0"  # TaskAnalyzer is always node 0
+        return "0"  # Virtual root node (no actual trace event)
     elif parent_id == "0":
         return str(sibling_count + 1)  # Orchestrator steps: "1", "2", "3"...
     else:
@@ -122,13 +122,13 @@ def calculate_depth(node_id: str) -> int:
     Calculate depth from node ID.
     
     Returns:
-        -1 for TaskAnalyzer (node_id="0")
+        -1 for virtual root (node_id="0", unused)
         0 for orchestrator (node_id="1", "2", etc.)
         1 for subagent (node_id="1.1", "2.3", etc.)
-        2 for BullshitCaller under subagent (node_id="1.1.1", "2.3.1", etc.)
+        2 for validator under subagent (node_id="1.1.1", "2.3.1", etc.)
     """
     if node_id == "0":
-        return -1  # TaskAnalyzer
+        return -1  # Virtual root (unused)
     return node_id.count(".")  # "1"->0, "1.2"->1, "1.2.3"->2
 
 
@@ -151,9 +151,9 @@ def create_trace_event(
     
     Args:
         node_id: Unique node ID (e.g., "2.3")
-        parent_node_id: Parent's node ID (None for TaskAnalyzer)
+        parent_node_id: Parent's node ID (None for root)
         sibling_index: 0-indexed position among siblings (for computing prev_sibling_node_id)
-        context: Agent name (TaskAnalyzer, Orchestrator, ProductExplorer, etc.)
+        context: Agent name (Orchestrator, ProductExplorer, etc.)
         system_prompt: The system prompt (stored separately)
         input_messages: Conversation messages WITHOUT system prompt
         output: Parsed LLM response (model_dump())

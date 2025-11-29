@@ -35,7 +35,6 @@ from agent_types import (
 # Import from agent_execution
 from agent_execution import (
     run_agent_loop,
-    run_task_analyzer,
 )
 
 # Import terminal actions for handle_task_completion
@@ -139,9 +138,6 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
     if config.VERBOSE:
         print(f"\nTask: {task.task_text}\n")
     
-    # Preprocess task to expand requirements (node_id="0", depth=-1)
-    expanded_task = run_task_analyzer(task.task_text, trace, task_ctx=task_ctx)
-    
     # Get orchestrator config
     orchestrator_config = AGENT_REGISTRY["Orchestrator"]
     system_prompt = f"{orchestrator_config['system_prompt']}first step"
@@ -149,17 +145,17 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
     # Initialize orchestrator_log for subagent context
     orchestrator_log = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": expanded_task},
+        {"role": "user", "content": task.task_text},
     ]
     
     try:
         # Run orchestrator via unified loop
         result = run_agent_loop(
             agent_config=orchestrator_config,
-            initial_context=expanded_task,
+            initial_context=task.task_text,
             benchmark_client=benchmark_client,
             trace=trace,
-            parent_node_id="0",  # Orchestrator is child of TaskAnalyzer
+            parent_node_id="0",  # Orchestrator steps start from "1" (virtual root "0")
             orchestrator_log=orchestrator_log,
             task_ctx=task_ctx,
         )

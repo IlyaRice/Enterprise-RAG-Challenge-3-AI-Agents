@@ -7,9 +7,6 @@ Contains:
 - META_TOOLS tuple (for dispatch routing)
 - Helper functions for agent/validator lookup
 
-Note: TaskAnalyzer is a "leaf agent" - single LLM call that auto-terminates.
-Validators (BullshitCaller, etc.) are in VALIDATOR_REGISTRY, triggered by tool types.
-
 Import hierarchy: This module imports from subagent_prompts.py
 """
 
@@ -25,7 +22,7 @@ from subagent_prompts import (
     # Terminal actions
     CompleteTask, RefuseTask,
     # Validators
-    system_prompt_bullshit_caller, bullshit_caller_schema,
+    system_prompt_step_validator, step_validator_schema,
 )
 
 
@@ -60,13 +57,13 @@ TERMINAL_ACTIONS = (CompleteTask, RefuseTask)
 # - max_attempts: How many validation failures before forcing termination
 
 VALIDATOR_REGISTRY = {
-    "terminal_validator": {
-        "name": "BullshitCaller",
-        "system_prompt": system_prompt_bullshit_caller,
-        "schema": bullshit_caller_schema,
-        "triggers_on_tools": (CompleteTask, RefuseTask),
-        "applies_to_agents": "*",  # all agents
-        "max_attempts": 3,
+    "step_validator": {
+        "name": "StepValidator",
+        "system_prompt": system_prompt_step_validator,
+        "schema": step_validator_schema,
+        "triggers_on_tools": "*",  # all tools including terminals
+        "applies_to_agents": ("Orchestrator",),
+        "max_attempts": 2,
     },
 }
 

@@ -2,13 +2,12 @@
 Agent prompts and schemas for the Store API benchmark.
 
 Contains system prompts and Pydantic schemas for all agents:
-- TaskAnalyzer (preprocessing)
 - Orchestrator (coordination)
 - ProductExplorer (product search)
 - CouponOptimizer (coupon management)
 - BasketBuilder (basket management)
 - CheckoutProcessor (purchase completion)
-- BullshitCaller (validation)
+- StepValidator (pre-execution validation)
 
 Schema pattern per agent:
   SingleCall*: call_mode="single", function=Union[tools, RefuseTask, CompleteTask]
@@ -33,34 +32,6 @@ class RefuseTask(BaseModel):
 class CompleteTask(BaseModel):
     tool: Literal["complete_task"]
     report: str = Field(description="Concise report for orchestrator: subtask outcome, key domain facts/state, and any limitations or unsatisfied parts of the delegated task")
-
-
-# ============================================================================
-# TASK ANALYZER (preprocessing before orchestrator)
-# ============================================================================
-
-class TaskAnalysisResponse(BaseModel):
-    gotchas: list[str] = Field(description="Top 3 most unobvious gotchas about task interpretation")
-    wording_explanations: list[str] = Field(description="3 explanations of different wording parts")
-    tldr_rephrased_task: str = Field(description="TL;DR rephrased task that agent will see")
-
-system_prompt_task_analyzer = """You are a strict semantic interpreter helping an AI agent complete tasks in the Store API.
-
-<problem>
-The agent has problems with task interpretation. It infers, assumes, and uses common sense.
-But tasks should be interpreted as literally as possible and followed to the last letter.
-</problem>
-
-<your_role>
-You basically strict semantic interpreter. Identify possible gotchas to help the agent avoid them by providing few unobvious misinterpretations of the task.
-</your_role>
-
-<output_format>
-Be brief. Top 3 most unobvious gotchas. Analyze meaning of the task wording. 3 explanations of different wording parts. Do not explain algorithm of actions.
-
-Add TL;DR rephrased task - the agent will see only your tldr. Explain every wording meaning there.
-</output_format>
-"""
 
 
 # ============================================================================
@@ -623,65 +594,71 @@ class NextStepOrchestrator(BaseModel):
 
 
 # ============================================================================
-# BULLSHIT CALLER - Terminal Action Validator
+# STEP VALIDATOR - Pre-execution Plan Validator
 # ============================================================================
-# Validates CompleteTask and RefuseTask terminal actions across all agents.
+# Validates agent plans BEFORE execution. Catches planning mistakes early.
 
-system_prompt_bullshit_caller = """
+system_prompt_step_validator = """
 <role>
-You are a strict validation agent that checks if an agent is ACTUALLY done with their task before they're allowed to complete or refuse.
-Your job is to call bullshit when agents try to complete prematurely or with wrong results.
+You are a pre-execution validator that reviews an agent's planned action BEFORE it executes.
+Your job is to catch planning mistakes, gaps in logic, and misalignments with the task.
 </role>
 
 <context>
 You will receive:
-1. The original task the agent was supposed to complete
-2. The agent's conversation history (what they did)
-3. Their terminal action (complete_task or refuse_task) with their report
+1. The original task the agent must complete
+2. The agent's system prompt (defines what the agent can/cannot do)
+3. The conversation history (what the agent has seen and done so far)
+4. The agent's planned next step (current_state, remaining_work, next_action, call)
 
-You must verify:
-- Did they ACTUALLY do what was asked?
-- Is the report accurate based on what happened?
-- Did they miss any requirements from the original task?
-- Are they claiming success when they should have failed (or vice versa)?
-- Are they being asked to do something outside their capabilities? (Check what tools/actions are available in their prompt)
+You must evaluate whether this plan makes sense given all the above.
 </context>
 
-<validation_rules>
-For complete_task:
-- Verify the task was actually accomplished as written
-- Check that all requirements in the original task are satisfied
-- Confirm the report matches what actually happened (check SDK responses)
-- Look for premature completion (tried to complete after first step without finishing)
+<validation_criteria>
+Check for:
 
-For refuse_task:
-- Verify the task is genuinely impossible (not just hard)
-- Check if they actually tried reasonable approaches
-- Confirm they're not giving up too early
-- Verify the reason for refusal is legitimate
-- IMPORTANT: Check if the task asks the agent to do something outside their capabilities
-  * Example: basket_builder cannot manage coupons - that's coupon_optimizer's job
-  * Example: coupon_optimizer should only try coupons mentioned in the task, not explore all available coupons
-  * Example: product_explorer is read-only and cannot modify basket or checkout
-  * If the task requires capabilities the agent doesn't have, refusal is valid
-</validation_rules>
+1. Logical coherence:
+   - Does next_action align with the first item in remaining_work?
+   - Does the call match what next_action describes?
+   - Is current_state accurate based on conversation history?
+
+2. Task coverage:
+   - Does remaining_work address all requirements from the original task?
+   - Are there task requirements being ignored or forgotten?
+   - For optimization tasks (cheapest, best, etc.) - is the plan actually exploring alternatives?
+
+3. Tool appropriateness:
+   - Is the agent using the right tool for what it's trying to do?
+   - Is the agent attempting something outside its capabilities (check its system prompt)?
+   - Is the sequence of operations logical?
+
+4. Feasibility:
+   - Can this step actually be executed given current state?
+   - Are there dependencies that haven't been satisfied?
+   - Is the agent making assumptions that aren't supported by evidence?
+
+5. Premature completion:
+   - If agent is trying to complete_task or refuse_task, have they actually done everything needed?
+   - Are they giving up too early or completing without verifying success?
+</validation_criteria>
 
 <output>
-If everything checks out:
+If the plan is sound:
 - Set is_valid to true
 - Leave rejection_message empty
 
 If something is wrong:
 - Set is_valid to false
-- Write a rejection_message that tells the agent what they missed
-- Be specific about what's wrong and what they need to do
-- Be direct and blunt - this is a code review, not a therapy session
+- Write a rejection_message explaining:
+  * What specific problem you found
+  * What the agent should consider instead
+- Be concise but specific. The agent will use this to replan.
 </output>
 """
 
-class BullshitCallerResponse(BaseModel):
-    analysis: str = Field(..., description="Brief analysis of what the agent did vs what was asked")
-    is_valid: bool = Field(..., description="True if the completion/refusal is legitimate, False if bullshit")
-    rejection_message: str = Field(default="", description="If is_valid=False, the message to return as 'error'. Be specific about what's wrong.")
+class StepValidatorResponse(BaseModel):
+    analysis: str = Field(..., description="Brief analysis of the agent's plan against task requirements")
+    is_valid: bool = Field(..., description="True if plan is sound, False if issues found")
+    rejection_message: str = Field(default="", description="If is_valid=False, what's wrong and what to consider instead")
 
-bullshit_caller_schema = type_to_response_format_param(BullshitCallerResponse)
+step_validator_schema = type_to_response_format_param(StepValidatorResponse)

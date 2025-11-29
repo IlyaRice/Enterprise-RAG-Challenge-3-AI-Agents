@@ -3,11 +3,10 @@ Agent execution module.
 
 Contains:
 - run_agent_loop() - THE unified loop for all agents
+- validate_and_retry_step() - Pre-execution validation with retry
 - execute_tool_dispatch() - routes to SDK or meta-tool
 - execute_meta_tool() - spawns child agent (recursive)
-- handle_terminal_action() - terminal + validation logic
-- run_task_analyzer() - leaf agent, single LLM call, auto-terminates
-- run_validator() - validator execution, triggered by tool types
+- run_step_validator() - pre-execution plan validation (StepValidator)
 
 Import hierarchy: This module imports from infrastructure.py and agent_types.py
 """
@@ -39,93 +38,27 @@ from agent_types import (
     META_TOOLS, TERMINAL_ACTIONS,
     is_meta_tool, is_terminal_action,
     get_subagent_config,
-    get_validators_for_tool,
 )
 from subagent_prompts import (
-    # TaskAnalyzer
-    system_prompt_task_analyzer, TaskAnalysisResponse,
-    # BullshitCaller (validator)
-    BullshitCallerResponse,
+    # Validators
+    StepValidatorResponse,
     # Terminal actions
     CompleteTask, RefuseTask,
 )
 
 
 # ============================================================================
-# LEAF AGENTS AND VALIDATORS
+# VALIDATORS
 # ============================================================================
-# TaskAnalyzer: "leaf agent" - single LLM call that auto-terminates
 # Validators: Triggered by tools via VALIDATOR_REGISTRY, not agents
 
 @observe()
-def run_task_analyzer(task_text: str, trace: List[dict], task_ctx: TaskContext = None) -> str:
-    """
-    Preprocess task to expand implicit requirements before orchestration.
-    
-    This is a "leaf agent" - single LLM call that auto-terminates.
-    Logs as proper llm_call event with node_id="0", depth=-1.
-    
-    Args:
-        task_text: Raw task text from user
-        trace: Trace list to append events to
-        task_ctx: TaskContext for logging LLM usage to ERC3 platform
-    
-    Returns:
-        The tldr_rephrased_task from structured analysis.
-    """
-    schema = type_to_response_format_param(TaskAnalysisResponse)
-    
-    # Proper system/user message separation
-    messages = [
-        {"role": "system", "content": system_prompt_task_analyzer},
-        {"role": "user", "content": task_text},
-    ]
-    
-    llm_start = time.time()
-    response = client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=messages,
-        response_format=schema,
-        extra_body={
-            "provider": LLM_PROVIDER,
-        },
-    )
-    llm_duration = time.time() - llm_start
-    
-    # Log LLM usage to ERC3 platform
-    if task_ctx:
-        task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
-    
-    # Parse structured response
-    parsed = TaskAnalysisResponse.model_validate_json(response.choices[0].message.content)
-    reasoning = getattr(response.choices[0].message, 'reasoning', None)
-    
-    # Record as agent_step event
-    trace.append(create_trace_event(
-        node_id="0",
-        parent_node_id=None,
-        sibling_index=0,
-        context="TaskAnalyzer",
-        system_prompt=system_prompt_task_analyzer,
-        input_messages=[{"role": "user", "content": task_text}],
-        output=parsed.model_dump(),
-        reasoning=reasoning,
-        timing=llm_duration,
-        event_type="agent_step",
-    ))
-    
-    if config.VERBOSE:
-        print(f"Task rephrased to: {parsed.tldr_rephrased_task} ({llm_duration:.2f}s)")
-    # return parsed.tldr_rephrased_task
-    return task_text
-
-
-@observe()
-def run_validator(
+def run_step_validator(
     validator_config: dict,
     original_task: str,
-    conversation_log: List[dict],
-    terminal_action: Union[CompleteTask, RefuseTask],
+    agent_system_prompt: str,
+    conversation: List[dict],
+    agent_output: dict,
     validates_node_id: str,
     parent_node_id: str,
     sibling_count: int,
@@ -133,16 +66,17 @@ def run_validator(
     task_ctx: TaskContext = None,
 ) -> dict:
     """
-    Run a validator on a terminal action.
+    Run StepValidator on an agent's planned action BEFORE execution.
     
-    Validators are triggered by specific tools and check if the agent's action is valid.
-    Logged as "validator_step" event type.
+    This validates plans before they execute, catching mistakes early.
+    Different from run_validator() which validates terminal actions after.
     
     Args:
         validator_config: Config from VALIDATOR_REGISTRY
-        original_task: The task the agent was supposed to complete
-        conversation_log: The agent's conversation history
-        terminal_action: The CompleteTask or RefuseTask being attempted
+        original_task: The original task (for context)
+        agent_system_prompt: The agent's system prompt (to understand capabilities)
+        conversation: The conversation the agent saw
+        agent_output: The agent's full output (current_state, remaining_work, next_action, call)
         validates_node_id: The node_id of the step being validated
         parent_node_id: Parent's node_id for tree structure
         sibling_count: Number of siblings at this level (for node_id generation)
@@ -151,9 +85,9 @@ def run_validator(
     
     Returns:
         Dict with keys:
-        - is_valid: bool - True if action is legitimate
-        - rejection_message: str - Error message if not valid
-        - analysis: str - Validator's analysis (always present)
+        - is_valid: bool - True if plan is approved
+        - rejection_message: str - What's wrong if not valid
+        - analysis: str - Validator's analysis
     """
     # Generate node ID for this validator call
     node_id = next_node_id(parent_node_id, sibling_count)
@@ -163,25 +97,30 @@ def run_validator(
     system_prompt = validator_config["system_prompt"]
     schema = validator_config["schema"]
     
-    action_type = "complete_task" if isinstance(terminal_action, CompleteTask) else "refuse_task"
-    
-    # Build user message with validation context
+    # Build conversation summary
     conversation_summary = []
-    for msg in conversation_log:
+    for msg in conversation:
         role = msg.get("role", "unknown")
         content = msg.get("content", "")
         conversation_summary.append(f"[{role}]: {content}")
     
+    # Build user message with full validation context
     user_message = f"""Original task:
 {original_task}
 
-Agent's conversation history:
+Agent's system prompt (defines agent capabilities):
+{agent_system_prompt}
+
+Conversation history (what agent has seen):
 {chr(10).join(conversation_summary)}
 
-Terminal action attempted: {action_type}
-Agent's report: {terminal_action.report}
+Agent's planned next step:
+- Current state: {agent_output.get('current_state', 'N/A')}
+- Remaining work: {agent_output.get('remaining_work', [])}
+- Next action: {agent_output.get('next_action', 'N/A')}
+- Call: {agent_output.get('call', {})}
 
-Validate this terminal action. Is the agent actually done, or are they bullshitting?"""
+Validate this plan. Is it sound, or are there issues?"""
 
     llm_start = time.time()
     
@@ -205,7 +144,7 @@ Validate this terminal action. Is the agent actually done, or are they bullshitt
             task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
         
         content = response.choices[0].message.content
-        parsed = BullshitCallerResponse.model_validate_json(content)
+        parsed = StepValidatorResponse.model_validate_json(content)
         reasoning = getattr(response.choices[0].message, 'reasoning', None)
         
         # Log as validator_step event
@@ -218,20 +157,16 @@ Validate this terminal action. Is the agent actually done, or are they bullshitt
             validation_passed=parsed.is_valid,
             system_prompt=system_prompt,
             input_messages=[{"role": "user", "content": user_message}],
-            output={
-                "terminal_action": action_type,
-                **parsed.model_dump()
-            },
+            output=parsed.model_dump(),
             reasoning=reasoning,
             timing=llm_duration,
         ))
         
         if config.VERBOSE:
             if not parsed.is_valid:
-                print(f"    🐂💩 Bullshit called! ({llm_duration:.2f}s)")
-                print(f"    → {parsed.rejection_message}")
+                print(f"    ⚠ {validator_name} rejected ({llm_duration:.2f}s): {parsed.rejection_message[:60]}...")
             else:
-                print(f"    ✓ Validated ({llm_duration:.2f}s)")
+                print(f"    ✓ {validator_name} approved ({llm_duration:.2f}s)")
         
         return {
             "is_valid": parsed.is_valid,
@@ -240,15 +175,14 @@ Validate this terminal action. Is the agent actually done, or are they bullshitt
         }
         
     except Exception as e:
-        # On error, let the action proceed (fail-open)
-        # Still log the attempt
+        # On error, let the plan proceed (fail-open)
         trace.append(create_validator_event(
             node_id=node_id,
             parent_node_id=parent_node_id,
             sibling_index=sibling_count,
             validates_node_id=validates_node_id,
             validator_name=validator_name,
-            validation_passed=True,  # fail-open: allow action on validator error
+            validation_passed=True,  # fail-open
             system_prompt=system_prompt,
             input_messages=[{"role": "user", "content": user_message}],
             output={"error": str(e)},
@@ -263,6 +197,172 @@ Validate this terminal action. Is the agent actually done, or are they bullshitt
             "rejection_message": "",
             "analysis": f"Validation error: {e}"
         }
+
+
+def validate_and_retry_step(
+    agent_config: dict,
+    schema,
+    system_prompt: str,
+    conversation: List[dict],
+    llm_result: dict,
+    original_task: str,
+    parent_node_id: str,
+    step_count: int,
+    trace: List[dict],
+    task_ctx: TaskContext = None,
+) -> dict:
+    """
+    Pre-execution validation with retry capability.
+    
+    Validates agent's plan BEFORE execution. If rejected, agent replans
+    with feedback (but rejection is removed from final conversation).
+    
+    Only logs REJECTED attempts to trace. The final approved attempt
+    is NOT logged here - the caller logs it with execution results.
+    
+    Args:
+        agent_config: Agent configuration from registry
+        schema: Agent's output schema for get_next_step
+        system_prompt: Agent's system prompt
+        conversation: Current conversation (will NOT be modified)
+        llm_result: Initial LLM result from get_next_step
+        original_task: Original task for context
+        parent_node_id: Parent node ID for trace
+        step_count: Current step count (for node_id generation)
+        trace: Trace list to append events to
+        task_ctx: TaskContext for logging
+    
+    Returns:
+        dict with:
+        - "llm_result": The approved (or force-approved) LLM result
+        - "step_count": Updated step count (may have incremented due to retries)
+        - "node_id": The node_id for the approved step (to be logged by caller)
+    """
+    agent_name = agent_config["name"]
+    job = llm_result["parsed"]
+    
+    # Get the function to check for validator matching
+    if hasattr(job.call, 'function'):
+        function_to_execute = job.call.function
+    elif hasattr(job.call, 'functions'):
+        function_to_execute = job.call.functions[0] if job.call.functions else None
+    else:
+        function_to_execute = None
+    
+    if function_to_execute is None:
+        # No function, can't validate
+        node_id = next_node_id(parent_node_id, step_count)
+        return {
+            "llm_result": llm_result,
+            "step_count": step_count + 1,
+            "node_id": node_id,
+        }
+    
+    # Find StepValidator for this agent/tool (excluding terminal_validator by name)
+    from agent_types import VALIDATOR_REGISTRY
+    step_validators = []
+    for key, validator_cfg in VALIDATOR_REGISTRY.items():
+        if validator_cfg["name"] == "StepValidator":
+            triggers = validator_cfg["triggers_on_tools"]
+            tool_matches = triggers == "*" or isinstance(function_to_execute, triggers)
+            applies_to = validator_cfg["applies_to_agents"]
+            agent_matches = applies_to == "*" or agent_name in applies_to
+            if tool_matches and agent_matches:
+                step_validators.append(validator_cfg)
+    
+    if not step_validators:
+        # No StepValidator for this agent/tool - proceed without validation
+        node_id = next_node_id(parent_node_id, step_count)
+        return {
+            "llm_result": llm_result,
+            "step_count": step_count + 1,
+            "node_id": node_id,
+        }
+    
+    validator_config = step_validators[0]
+    max_attempts = validator_config.get("max_attempts", 2)
+    
+    current_llm_result = llm_result
+    current_step_count = step_count
+    
+    # Loop through max_attempts + 1 times to validate the final attempt too
+    for attempt in range(max_attempts + 1):
+        job = current_llm_result["parsed"]
+        node_id = next_node_id(parent_node_id, current_step_count)
+        
+        # Run StepValidator (appends validator_step to trace)
+        validation = run_step_validator(
+            validator_config=validator_config,
+            original_task=original_task,
+            agent_system_prompt=system_prompt,
+            conversation=conversation,
+            agent_output=current_llm_result["output"],
+            validates_node_id=node_id,
+            parent_node_id=node_id,
+            sibling_count=0,
+            trace=trace,
+            task_ctx=task_ctx,
+        )
+        
+        if validation["is_valid"]:
+            # Approved - return without logging (caller will log with execution results)
+            return {
+                "llm_result": current_llm_result,
+                "step_count": current_step_count + 1,
+                "node_id": node_id,
+            }
+        
+        # Rejected - reorder trace for chronological correctness
+        # validator_step was just appended, but agent_step should come first
+        validator_event = trace.pop()  # Remove validator_step temporarily
+        
+        # Log agent_step (the rejected attempt)
+        trace.append(create_trace_event(
+            node_id=node_id,
+            parent_node_id=parent_node_id,
+            sibling_index=current_step_count,
+            context=agent_name,
+            system_prompt=system_prompt,
+            input_messages=conversation.copy(),
+            output=current_llm_result["output"],
+            reasoning=current_llm_result["reasoning"],
+            timing=current_llm_result["timing"],
+            event_type="agent_step",
+        ))
+        
+        # Re-add validator_step after agent_step (correct chronological order)
+        trace.append(validator_event)
+        
+        current_step_count += 1
+        
+        # Retry if not the last attempt
+        if attempt < max_attempts:
+            # Build temp conversation with rejection for retry
+            temp_conversation = conversation.copy()
+            
+            # Add the rejected plan as assistant message
+            rejected_output = current_llm_result["output"]
+            temp_conversation.append({
+                "role": "assistant",
+                "content": f'Planned step:\n"{rejected_output.get("next_action", "")}"\n\nPlan rejected by validator.'
+            })
+            
+            # Add rejection feedback as user message
+            temp_conversation.append({
+                "role": "user",
+                "content": f"Your plan was rejected: {validation['rejection_message']}\n\nPlease reconsider and provide a revised plan."
+            })
+            
+            # Get new plan from agent
+            current_llm_result = get_next_step(schema, system_prompt, temp_conversation, task_ctx=task_ctx)
+    
+    # All attempts exhausted and rejected - force approve the last one
+    # (Already logged in the loop above)
+    return {
+        "llm_result": current_llm_result,
+        "step_count": current_step_count,
+        "node_id": node_id,
+    }
 
 
 # ============================================================================
@@ -362,97 +462,6 @@ def execute_meta_tool(
 
 
 # ============================================================================
-# TERMINAL ACTION HANDLING
-# ============================================================================
-
-def handle_terminal_with_validation(
-    terminal_action: Union[CompleteTask, RefuseTask],
-    original_task: str,
-    conversation_log: List[dict],
-    agent_name: str,
-    node_id: str,
-    validation_count: int,
-    trace: List[dict],
-    task_ctx: TaskContext = None,
-) -> dict:
-    """
-    Handle terminal action with validator(s) from VALIDATOR_REGISTRY.
-    
-    Looks up validators that trigger on terminal actions for this agent,
-    runs them, and determines whether agent should terminate.
-    
-    Args:
-        terminal_action: The CompleteTask or RefuseTask
-        original_task: Task being validated against
-        conversation_log: Agent's conversation history
-        agent_name: Name of the agent (for validator lookup)
-        node_id: Current node's ID (the node being validated)
-        validation_count: How many validations have failed so far
-        trace: Trace list to append events to
-        task_ctx: TaskContext for logging LLM usage to ERC3 platform
-    
-    Returns:
-        dict with:
-        - "should_terminate": bool - True if agent should stop
-        - "is_valid": bool - True if validation passed
-        - "rejection_message": str - Message if validation failed
-        - "analysis": str - Validator's analysis
-        - "max_attempts": int - Max attempts from validator config (for limit check)
-    """
-    # Find validators that trigger on this tool for this agent
-    validators = get_validators_for_tool(terminal_action, agent_name)
-    
-    if not validators:
-        # No validators configured - auto-approve
-        return {
-            "should_terminate": True,
-            "is_valid": True,
-            "rejection_message": "",
-            "analysis": "No validators configured",
-            "max_attempts": 1,
-        }
-    
-    # Use the first matching validator (typically terminal_validator)
-    validator_config = validators[0]
-    max_attempts = validator_config.get("max_attempts", 3)
-    
-    # Run validator
-    validation = run_validator(
-        validator_config=validator_config,
-        original_task=original_task,
-        conversation_log=conversation_log,
-        terminal_action=terminal_action,
-        validates_node_id=node_id,
-        parent_node_id=node_id,
-        sibling_count=0,  # Validator is first child of the node being validated
-        trace=trace,
-        task_ctx=task_ctx,
-    )
-    
-    is_limit_reached = validation_count >= max_attempts - 1
-    
-    if not validation["is_valid"] and not is_limit_reached:
-        # Validation failed, agent should continue
-        return {
-            "should_terminate": False,
-            "is_valid": False,
-            "rejection_message": validation["rejection_message"],
-            "analysis": validation["analysis"],
-            "max_attempts": max_attempts,
-        }
-    
-    # Either valid or limit reached - agent terminates
-    return {
-        "should_terminate": True,
-        "is_valid": validation["is_valid"] or is_limit_reached,
-        "rejection_message": "" if validation["is_valid"] else validation["rejection_message"],
-        "analysis": validation["analysis"],
-        "limit_reached": is_limit_reached and not validation["is_valid"],
-        "max_attempts": max_attempts,
-    }
-
-
-# ============================================================================
 # UNIFIED AGENT LOOP
 # ============================================================================
 
@@ -471,7 +480,7 @@ def run_agent_loop(
     
     This is the core execution engine. It handles:
     - LLM calls via get_next_step()
-    - Terminal action validation via BullshitCaller
+    - Pre-execution validation via StepValidator
     - Tool execution (SDK or meta-tool dispatch)
     - Conversation management
     - Trace event generation
@@ -517,19 +526,36 @@ def run_agent_loop(
     
     # Track state
     latest_plan = None
-    validation_count = 0
     step_count = 0
     
     # Main loop
     for i in range(max_steps):
         # Get LLM decision
         llm_result = get_next_step(schema, system_prompt, conversation, task_ctx=task_ctx)
+        
+        # Pre-execution validation (StepValidator)
+        # May produce new llm_result if rejected and retried
+        # Logs rejected attempts to trace; approved attempt logged by branches below
+        validation_result = validate_and_retry_step(
+            agent_config=agent_config,
+            schema=schema,
+            system_prompt=system_prompt,
+            conversation=conversation,
+            llm_result=llm_result,
+            original_task=initial_context,
+            parent_node_id=parent_node_id,
+            step_count=step_count,
+            trace=trace,
+            task_ctx=task_ctx,
+        )
+        
+        # Use validated result
+        llm_result = validation_result["llm_result"]
+        step_count = validation_result["step_count"]
+        node_id = validation_result["node_id"]
+        
         job = llm_result["parsed"]
         latest_plan = getattr(job, 'remaining_work', None)
-        
-        # Generate node ID for this step
-        node_id = next_node_id(parent_node_id, step_count)
-        step_count += 1
         
         # Get the function to execute
         if hasattr(job.call, 'function'):
@@ -560,55 +586,14 @@ def run_agent_loop(
                 event_type="agent_step",
             ))
             
-            # Run validation (looks up validators from VALIDATOR_REGISTRY)
-            validation_result = handle_terminal_with_validation(
-                terminal_action=function_to_execute,
-                original_task=initial_context,
-                conversation_log=full_log,
-                agent_name=agent_name,
-                node_id=node_id,
-                validation_count=validation_count,
-                trace=trace,
-                task_ctx=task_ctx,
-            )
+            # Agent terminates
+            status = "completed" if isinstance(function_to_execute, CompleteTask) else "refused"
+            report = function_to_execute.report
             
-            if validation_result["should_terminate"]:
-                # Agent terminates
-                status = "completed" if isinstance(function_to_execute, CompleteTask) else "refused"
-                report = function_to_execute.report
-                
-                # Add validator note if limit reached
-                if validation_result.get("limit_reached"):
-                    max_attempts = validation_result.get("max_attempts", 3)
-                    validator_note = f"\n\n[Validator note after {max_attempts} checks: {validation_result['analysis']}]"
-                    report = report + validator_note
-                    if config.VERBOSE:
-                        print(f"    ⚠ Limit reached, allowing termination with validator note")
-                
-                result = {"status": status, "report": report}
-                if orchestrator_log is not None:
-                    result["orchestrator_log"] = orchestrator_log
-                return result
-            
-            # Validation failed - continue loop
-            validation_count += 1
-            tool_name = "complete_task" if isinstance(function_to_execute, CompleteTask) else "refuse_task"
-            error_response = f'{{"error": "Validation failed: {validation_result["rejection_message"]}"}}'
-            
-            # Update conversation
-            inject_plan(conversation, latest_plan)
-            conversation.append({
-                "role": "assistant",
-                "content": f'Planned step:\n"{job.next_action}"\n\nRequest:\n`{{"tool": "{tool_name}", "report": "{function_to_execute.report}"}}`\n\nResponse:\n`{error_response}`'
-            })
-            
-            # Update full_log
-            inject_plan(full_log, latest_plan)
-            full_log.append({
-                "role": "assistant",
-                "content": f'Planned step:\n"{job.next_action}"\n\nRequest:\n`{{"tool": "{tool_name}", "report": "{function_to_execute.report}"}}`\n\nResponse:\n`{error_response}`'
-            })
-            continue
+            result = {"status": status, "report": report}
+            if orchestrator_log is not None:
+                result["orchestrator_log"] = orchestrator_log
+            return result
         
         # Handle meta-tools (orchestrator delegating to subagent)
         if tool_type == "meta" and is_meta_tool(function_to_execute):
