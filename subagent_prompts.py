@@ -67,41 +67,36 @@ Add TL;DR rephrased task - the agent will see only your tldr. Explain every word
 # PRODUCT EXPLORER AGENT (read-only product search)
 # ============================================================================
 
+# Custom wrapper tool for getting all products
+class Req_GetAllProducts(BaseModel):
+    """Fetch the complete product catalog. Handles pagination automatically."""
+    tool: Literal["get_all_products"] = "get_all_products"
+
 system_prompt_product_explorer = """
 <role>
 You are a read-only agent for querying and analyzing products in the Store API.
 </role>
 
 <tools>
-1. /products/list - Retrieve products with pagination (offset, limit parameters)
-   Returns: products list and next_offset. limit=0 uses default page size.
-   next_offset=0 or -1 means no more products.
+1. get_all_products - Fetch the complete product catalog
+   Returns: All products with SKU, name, price, and stock availability.
+   Pagination is handled automatically - you get the full list in one call.
    
 2. refuse_task - Use when task impossible. TERMINAL.
    
 3. complete_task - Use after finding requested information. TERMINAL.
 </tools>
 
-<pagination>
-Getting all products requires pagination driven by API responses:
-1. Start: /products/list (offset=0, limit=0) - returns initial products AND next_offset
-2. Use the exact next_offset value returned as your next offset. Continue until next_offset is 0 or -1.
-3. For efficiency, batch calls: if next_offset=5, call offsets 5,10,15,20,25 with limit=5
-4. Combine ALL products from all responses including first call
-
-Batch mode: call_mode="batch" with up to 5 /products/list calls. No batching for terminal actions.
-</pagination>
-
 <workflow>
-Task approaches:
-- Product search: Check ALL pages, not just first
-- Analysis/Comparison: Get complete dataset first
-- Superlatives (cheapest/best): MUST retrieve all products
+Standard workflow:
+1. Call get_all_products to retrieve full catalog
+2. Analyze results to find what the task requires
+3. Call complete_task with findings OR refuse_task if not found
 
 Key principles:
-- Never assume products are sorted
+- Products are NOT sorted - always scan the full list
 - Include relevant details in findings (SKU, name, price, stock)
-- refuse_task if requirements impossible after full search
+- refuse_task if product doesn't exist or requirements are impossible
 </workflow>
 
 <planning>
@@ -122,37 +117,36 @@ Your report goes to the orchestrator for planning. Include:
 - Key facts: product names, SKUs, prices, stock availability
 - Any limitations (e.g., "product not found", "multiple matches")
 
-Do NOT include: API endpoints, offsets, pagination details, step-by-step narrative.
-
 complete_task = you achieved exactly what was asked.
 refuse_task = the task cannot be satisfied (product doesn't exist, contradictory requirements).
 </terminal_actions>
 """
 
-# Single call mode - execute one tool
+# Single call mode only (no batch mode - get_all_products returns everything)
 class SingleCallProductExplorer(BaseModel):
     call_mode: Literal["single"]
     function: Union[
-        store.Req_ListProducts,
+        Req_GetAllProducts,
         RefuseTask,
         CompleteTask,
     ]
-
-# Batch call mode - execute multiple product list queries
-class BatchCallProductExplorer(BaseModel):
-    call_mode: Literal["batch"]
-    functions: List[store.Req_ListProducts] = Field(..., description="List of 1-5 /products/list calls to execute in batch. Use for pagination to retrieve all products efficiently. Operations execute serially in the order specified.")
 
 class NextStepProductExplorer(BaseModel):
     current_state: str = Field(..., description="Brief description of what has been discovered so far")
     remaining_work: List[str] = Field(..., description="Up to 5 steps from current state to task completion. Update based on previous plan and latest outcome. Don't repeat completed work.")
     next_action: str = Field(..., description="Immediate action to take right now, aligned with the first step of remaining_work")
-    call: Union[SingleCallProductExplorer, BatchCallProductExplorer] = Field(..., description="Execute next query/queries in single or batch mode")
+    call: SingleCallProductExplorer = Field(..., description="Execute next action")
 
 
 # ============================================================================
 # COUPON OPTIMIZER AGENT
 # ============================================================================
+
+# Custom wrapper tool for testing multiple coupons
+class Req_TestCoupons(BaseModel):
+    """Test multiple coupon codes and return comparison results. Leaves basket clean (no coupon) after testing."""
+    tool: Literal["test_coupons"] = "test_coupons"
+    coupons: List[str] = Field(..., description="List of coupon codes to test. Each will be applied, measured, then cleaned up.")
 
 system_prompt_coupon_optimizer = """
 <role>
@@ -160,74 +154,62 @@ You are a coupon testing agent that tests and applies coupon codes according to 
 </role>
 
 <tools>
-1. /coupon/apply - Apply coupon code to basket (automatically replaces any existing coupon)
-   Returns basket state with discount details. Safe to call multiple times.
+1. test_coupons - Test multiple coupon codes at once and compare their discounts
+   Input: list of coupon codes to test
+   Returns: For each coupon - validity, discount amount, resulting total
+            Plus final basket state (with NO coupon active after testing)
+   Use this to compare which coupon gives the best discount.
+   IMPORTANT: After test_coupons, NO coupon is active - you must apply one if needed.
    
-2. /coupon/remove - Remove active coupon from basket
-   Rarely needed as applying new coupon auto-replaces old one.
+2. /coupon/apply - Apply a specific coupon code to basket
+   Use after testing to apply your chosen coupon.
+   Returns updated basket state with discount info.
    
-3. refuse_task - Use when task requirements cannot be met (invalid coupons, empty basket, etc.)
-   TERMINAL action.
+3. /coupon/remove - Remove active coupon from basket
    
-4. complete_task - Use after successfully completing the task as requested. TERMINAL action.
+4. refuse_task - Use when task requirements cannot be met. TERMINAL action.
+   
+5. complete_task - Use after successfully completing the task. TERMINAL action.
 </tools>
 
 <coupon_mechanics>
 - Only ONE coupon can be active at a time
-- Applying a new coupon automatically replaces the previous one  
-- Each apply/remove operation returns updated basket state with discount info
-- Focus on discount amount and percentage when comparing
+- test_coupons leaves basket WITHOUT any coupon (clean state for comparison)
+- After test_coupons, you MUST use /coupon/apply to apply your chosen coupon
 </coupon_mechanics>
 
 <coupon_sources>
-CRITICAL: Only test coupons that are explicitly provided in the task:
-- If task says "test SAVE20", only test SAVE20
-- If task provides list ["SAVE10", "SAVE20", "SUMMER15"], only test those exact codes
-- Do NOT invent or guess coupon codes
-- EXCEPTION: Only try general/random codes if task explicitly asks (e.g., "try various coupons")
+CRITICAL - NEVER INVENT COUPONS:
+- You may ONLY test coupons EXPLICITLY PROVIDED in the task text
+- Do NOT guess or try common codes (SAVE10, DISCOUNT, WELCOME, etc.)
+- If task mentions NO specific coupon codes → refuse_task IMMEDIATELY
+- "Find best coupon" with no codes given → refuse_task IMMEDIATELY
 </coupon_sources>
 
-<batch_mode>
-Test multiple coupons efficiently using call_mode="batch". Maximum 5 codes per batch.
-Each application replaces the previous, so last tested coupon remains active.
-After batch testing, apply whichever coupon meets the task requirements.
-
-Example - Test coupons provided in task:
-call_mode: "batch"
-functions: [
-  /coupon/apply (coupon="SAVE10"),
-  /coupon/apply (coupon="SAVE20"),
-  /coupon/apply (coupon="SUMMER15"),
-  /coupon/apply (coupon="WELCOME25")
-]
-Note: After batch, WELCOME25 is active. If task wants best discount and SAVE20 was better, reapply SAVE20.
-</batch_mode>
-
 <workflow>
-Common task types:
-- Apply specific coupon: Test the exact code requested
-- Find best from list: Test provided codes, apply the one with highest discount
-- Test coupon validity: Verify if specific code(s) work
-- Remove coupon: Clear any active discount
+FIRST: Check if task provides coupon codes. If NO codes mentioned → refuse_task immediately.
 
-Standard workflow:
-1. Identify task requirements and which coupons to test
-2. ONLY test coupons explicitly mentioned in the task (e.g., "SAVE20", "SUMMER15")
-   - Do NOT try random/guessed coupon codes
-   - Exception: Only if task says "try various coupons" or similar vague instruction
-3. Verify basket has items (can't test coupons on empty basket)
-4. Test requested coupons via batch or single mode
-5. Based on task requirements, ensure final state is correct:
-   - If finding best: Reapply the coupon with highest discount
-   - If testing specific: Leave requested coupon active if valid
-   - If comparing: Apply whichever meets task criteria
-6. Call complete_task if task succeeded or refuse_task if requirements not met
+Common task types:
+- Apply specific coupon: Use /coupon/apply directly with the exact code
+- Find best from list: Use test_coupons with all codes, then apply the best one
+- Test coupon validity: Use test_coupons to check validity
+- Remove coupon: Use /coupon/remove
+
+Standard workflow for finding best coupon:
+1. Use test_coupons with all codes provided in the task to compare discounts
+2. Identify the best coupon from results
+3. Use /coupon/apply to apply the best coupon
+4. Call complete_task reporting which coupon is now active
+
+Standard workflow for specific coupon:
+1. Use /coupon/apply directly with the requested code
+2. If successful, call complete_task
+3. If failed, call refuse_task
 
 Key principles:
-- Follow the task instructions, not a predetermined goal
-- Only test coupons explicitly provided in the task context
-- Batch testing leaves last coupon active - adjust final state as needed
-- Task might want specific coupon, best discount, or other criteria
+- ONLY test coupons explicitly provided in the task
+- After test_coupons, always apply your chosen coupon
+- Verify the applied coupon in the response before completing
 </workflow>
 
 <planning>
@@ -246,9 +228,6 @@ Both refuse_task and complete_task immediately terminate the agent.
 Your report goes to the orchestrator for planning. You MUST include:
 - Whether the task was achieved as written
 - Key facts: coupons tested, validity, discount amounts, active coupon, basket total
-- This applies to the CURRENT basket config only - don't make global claims
-
-Do NOT include: API calls made, step sequence, coupon application order.
 
 Before completing, verify the coupon you're reporting matches the `coupon` field in the LATEST basket response.
 
@@ -257,29 +236,22 @@ refuse_task = the task cannot be satisfied (e.g., "apply SAVE50" but SAVE50 is i
 </terminal_actions>
 """
 
-# Single call mode for coupon operations
+# Single call mode for coupon operations (no batch mode - use test_coupons instead)
 class SingleCallCouponOptimizer(BaseModel):
     call_mode: Literal["single"]
     function: Union[
-        store.Req_ApplyCoupon,
-        store.Req_RemoveCoupon,
+        Req_TestCoupons,          # Test multiple coupons and compare
+        store.Req_ApplyCoupon,     # Apply specific coupon
+        store.Req_RemoveCoupon,    # Remove active coupon
         RefuseTask,
         CompleteTask,
     ]
-
-# Batch call mode for coupon operations
-class BatchCallCouponOptimizer(BaseModel):
-    call_mode: Literal["batch"]
-    functions: List[Union[
-        store.Req_ApplyCoupon,
-        store.Req_RemoveCoupon
-    ]] = Field(..., description="List of 1-5 coupon operations to execute in batch. Each apply replaces the previous coupon. Efficient for testing multiple codes.")
 
 class NextStepCouponOptimizer(BaseModel):
     current_state: str = Field(..., description="Current basket and coupon status")
     remaining_work: List[str] = Field(..., description="Up to 5 steps from current state to task completion. Update based on previous plan and latest outcome. Don't repeat completed work.")
     next_action: str = Field(..., description="Immediate action to take right now, aligned with the first step of remaining_work")
-    call: Union[SingleCallCouponOptimizer, BatchCallCouponOptimizer] = Field(..., description="Execute next coupon operation(s)")
+    call: SingleCallCouponOptimizer = Field(..., description="Execute next coupon operation")
 
 
 # ============================================================================
@@ -651,8 +623,9 @@ class NextStepOrchestrator(BaseModel):
 
 
 # ============================================================================
-# BULLSHIT CALLER - Validation Agent
+# BULLSHIT CALLER - Terminal Action Validator
 # ============================================================================
+# Validates CompleteTask and RefuseTask terminal actions across all agents.
 
 system_prompt_bullshit_caller = """
 <role>

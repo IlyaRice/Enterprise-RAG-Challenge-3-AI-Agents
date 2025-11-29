@@ -4,7 +4,7 @@ Infrastructure module for agent execution.
 Contains:
 - OpenAI client initialization
 - LLM interface (get_next_step) - SINGLE place for all LLM calls
-- Trace helpers (next_node_id, calculate_depth, create_llm_event)
+- Trace helpers (next_node_id, calculate_depth, create_trace_event, create_validator_event)
 - SDK execution (execute_sdk_tool, execute_batch, dispatch_with_timeout)
 - Conversation utilities (build_subagent_context, format_subagent_result, inject_plan)
 - Error definitions (AgentError, AgentTimeoutError)
@@ -132,7 +132,7 @@ def calculate_depth(node_id: str) -> int:
     return node_id.count(".")  # "1"->0, "1.2"->1, "1.2.3"->2
 
 
-def create_llm_event(
+def create_trace_event(
     node_id: str,
     parent_node_id: str | None,
     sibling_index: int,
@@ -142,22 +142,24 @@ def create_llm_event(
     output: dict,
     reasoning: str | None,
     timing: float,
+    event_type: str = "agent_step",
     tool_calls: List[dict] | None = None,
     subagent_result: dict | None = None,
 ) -> dict:
     """
-    Create a unified llm_call trace event.
+    Create a trace event for agent steps.
     
     Args:
         node_id: Unique node ID (e.g., "2.3")
         parent_node_id: Parent's node ID (None for TaskAnalyzer)
         sibling_index: 0-indexed position among siblings (for computing prev_sibling_node_id)
-        context: Agent name (TaskAnalyzer, Orchestrator, ProductExplorer, BullshitCaller, etc.)
+        context: Agent name (TaskAnalyzer, Orchestrator, ProductExplorer, etc.)
         system_prompt: The system prompt (stored separately)
         input_messages: Conversation messages WITHOUT system prompt
         output: Parsed LLM response (model_dump())
         reasoning: LLM's reasoning/thinking (if available)
         timing: LLM call duration in seconds
+        event_type: Type of event ("agent_step" or "validator_step")
         tool_calls: List of SDK calls made [{request: {}, response: {}}, ...]
         subagent_result: Subagent completion info (orchestrator only)
     
@@ -171,7 +173,7 @@ def create_llm_event(
         prev_sibling = None
     
     event = {
-        "event": "llm_call",
+        "event": event_type,
         "node_id": node_id,
         "parent_node_id": parent_node_id,
         "prev_sibling_node_id": prev_sibling,
@@ -191,6 +193,61 @@ def create_llm_event(
         event["subagent_result"] = subagent_result
     
     return event
+
+
+def create_validator_event(
+    node_id: str,
+    parent_node_id: str | None,
+    sibling_index: int,
+    validates_node_id: str,
+    validator_name: str,
+    validation_passed: bool,
+    system_prompt: str,
+    input_messages: List[dict],
+    output: dict,
+    reasoning: str | None,
+    timing: float,
+) -> dict:
+    """
+    Create a trace event for validator steps.
+    
+    Args:
+        node_id: Unique node ID for this validator call (e.g., "2.3.1")
+        parent_node_id: Parent's node ID (the agent step being validated)
+        sibling_index: 0-indexed position among siblings
+        validates_node_id: The node_id of the step being validated
+        validator_name: Name of the validator (e.g., "BullshitCaller")
+        validation_passed: Whether the validator approved the action (schema-independent)
+        system_prompt: The validator's system prompt
+        input_messages: Messages sent to the validator
+        output: Parsed validator response (model_dump())
+        reasoning: LLM's reasoning/thinking (if available)
+        timing: LLM call duration in seconds
+    
+    Returns:
+        Properly structured validator trace event dict
+    """
+    # Compute prev_sibling_node_id for execution flow edges
+    if sibling_index > 0 and parent_node_id is not None:
+        prev_sibling = next_node_id(parent_node_id, sibling_index - 1)
+    else:
+        prev_sibling = None
+    
+    return {
+        "event": "validator_step",
+        "node_id": node_id,
+        "parent_node_id": parent_node_id,
+        "prev_sibling_node_id": prev_sibling,
+        "validates_node_id": validates_node_id,
+        "depth": calculate_depth(node_id),
+        "validator_name": validator_name,
+        "validation_passed": validation_passed,
+        "system_prompt": system_prompt,
+        "input_messages": input_messages,
+        "output": output,
+        "reasoning": reasoning,
+        "timing": round(timing, 2),
+    }
 
 
 # ============================================================================
@@ -337,12 +394,198 @@ def append_basket_state_if_needed(job_function, benchmark_client, benchmark: str
         return f"{original_txt}\n\nBasket contents:\n[Error fetching basket: {str(e)}. Please use Req_ViewBasket manually to verify.]"
 
 
+def execute_test_coupons(function, benchmark_client) -> dict:
+    """
+    Test multiple coupon codes and return comparison results.
+    Leaves basket in clean state (no coupon applied) after testing.
+    
+    Args:
+        function: Req_TestCoupons instance with coupons list
+        benchmark_client: SDK client for API calls
+    
+    Returns:
+        dict with:
+        - "text": formatted response string for conversation log
+        - "tool_call": {request, response} dict for trace
+    """
+    coupons = function.coupons
+    results = []
+    
+    for coupon_code in coupons:
+        try:
+            # Apply the coupon
+            benchmark_client.dispatch(store.Req_ApplyCoupon(coupon=coupon_code))
+            # Get basket state to measure effect
+            basket = benchmark_client.dispatch(store.Req_ViewBasket())
+            
+            result_entry = {
+                "coupon": coupon_code,
+                "valid": True,
+                "subtotal": basket.subtotal,
+                "discount": basket.discount or 0,
+                "total": basket.total,
+            }
+            results.append(result_entry)
+            
+        except ApiException as e:
+            error_msg = e.api_error.error if hasattr(e, 'api_error') else str(e)
+            results.append({
+                "coupon": coupon_code,
+                "valid": False,
+                "error": error_msg,
+            })
+    
+    # Cleanup: remove any active coupon to leave basket clean
+    try:
+        current_basket = benchmark_client.dispatch(store.Req_ViewBasket())
+        if current_basket.coupon:
+            benchmark_client.dispatch(store.Req_RemoveCoupon())
+    except Exception as e:
+        pass  # Best effort cleanup
+    
+    # Get final clean basket state
+    try:
+        final_basket = benchmark_client.dispatch(store.Req_ViewBasket())
+        final_basket_dict = final_basket.model_dump(exclude_none=True)
+    except Exception as e:
+        final_basket_dict = {"error": str(e)}
+    
+    # Format response
+    return _format_coupon_test_results(coupons, results, final_basket_dict)
+
+
+def _format_coupon_test_results(coupons: list, results: list, final_basket: dict) -> dict:
+    """Format coupon test results into readable text and structured data."""
+    lines = ["Coupon Test Results:", "-" * 30]
+    
+    coupons_with_discount = []
+    coupons_valid_no_discount = []
+    
+    for r in results:
+        if r["valid"]:
+            discount = r["discount"]
+            subtotal = r["subtotal"]
+            
+            if discount > 0:
+                pct = round(discount / subtotal * 100, 1) if subtotal > 0 else 0
+                lines.append(f"{r['coupon']}: Valid - Subtotal: {subtotal}, Discount: {discount} ({pct}%), Total: {r['total']}")
+                coupons_with_discount.append(r)
+            else:
+                lines.append(f"{r['coupon']}: Valid but no discount (Subtotal: {subtotal}, Total: {r['total']})")
+                coupons_valid_no_discount.append(r)
+        else:
+            lines.append(f"{r['coupon']}: Invalid - {r.get('error', 'Unknown error')}")
+    
+    # Summary
+    lines.append("")
+    if coupons_with_discount:
+        best = max(coupons_with_discount, key=lambda x: x["discount"])
+        lines.append(f"Best discount: {best['coupon']} (saves {best['discount']})")
+    elif coupons_valid_no_discount:
+        lines.append("All coupons valid but provide no discount for current basket")
+    else:
+        lines.append("No valid coupons found")
+    
+    # Final basket state (no coupon active)
+    lines.append("")
+    lines.append("Final Basket State (no coupon active):")
+    if "error" in final_basket:
+        lines.append(f"  Error: {final_basket['error']}")
+    else:
+        lines.append(f"  Items: {final_basket.get('items', [])}")
+        lines.append(f"  Subtotal: {final_basket.get('subtotal', 'N/A')}")
+        lines.append(f"  Coupon: {final_basket.get('coupon', 'None')}")
+        lines.append(f"  Total: {final_basket.get('total', 'N/A')}")
+    
+    text = "\n".join(lines)
+    
+    return {
+        "text": text,
+        "tool_call": {
+            "request": {"tool": "test_coupons", "coupons": coupons},
+            "response": {"results": results, "final_basket": final_basket}
+        }
+    }
+
+
+def execute_get_all_products(function, benchmark_client) -> dict:
+    """
+    Fetch all products from the catalog with automatic pagination.
+    
+    Args:
+        function: Req_GetAllProducts instance
+        benchmark_client: SDK client for API calls
+    
+    Returns:
+        dict with:
+        - "text": formatted product list for conversation log
+        - "tool_call": {request, response} dict for trace
+    
+    Raises:
+        ApiException: If any pagination call fails (fail-fast, no partial results)
+    """
+    all_products = []
+    offset = 0
+    pages_fetched = 0
+    
+    while True:
+        # Fetch next page
+        response = benchmark_client.dispatch(store.Req_ListProducts(offset=offset, limit=0))
+        pages_fetched += 1
+        
+        products_in_page = response.products or []
+        all_products.extend(products_in_page)
+        
+        # Check if done
+        if response.next_offset is None or response.next_offset <= 0:
+            break
+        
+        offset = response.next_offset
+    
+    # Format response
+    return _format_all_products_result(all_products, pages_fetched)
+
+
+def _format_all_products_result(products: list, pages_fetched: int) -> dict:
+    """Format all products into compact readable text and structured data."""
+    if not products:
+        text = "No products found in catalog."
+        return {
+            "text": text,
+            "tool_call": {
+                "request": {"tool": "get_all_products"},
+                "response": {"products": [], "pages_fetched": pages_fetched}
+            }
+        }
+    
+    # Compact format: one line per product
+    lines = ["Products:"]
+    for p in products:
+        lines.append(f"  {p.sku} | {p.name} | price={p.price} | stock={p.available}")
+    
+    text = "\n".join(lines)
+    
+    # Structured response for trace
+    products_data = [
+        {"sku": p.sku, "name": p.name, "price": p.price, "available": p.available}
+        for p in products
+    ]
+    
+    return {
+        "text": text,
+        "tool_call": {
+            "request": {"tool": "get_all_products"},
+            "response": {"products": products_data, "pages_fetched": pages_fetched}
+        }
+    }
+
+
 def execute_single_call(function, benchmark_client, benchmark: str) -> dict:
     """
     Execute a single SDK tool call.
     
     Args:
-        function: SDK request object (e.g., store.Req_ProductsList)
+        function: SDK request object (e.g., store.Req_ProductsList) or custom wrapper tool
         benchmark_client: SDK client for API calls
         benchmark: Benchmark name (e.g., "store")
     
@@ -351,6 +594,14 @@ def execute_single_call(function, benchmark_client, benchmark: str) -> dict:
         - "text": formatted response string for conversation log
         - "tool_call": {request, response} dict for trace
     """
+    # Handle custom wrapper tools first
+    if hasattr(function, 'tool'):
+        if function.tool == "test_coupons":
+            return execute_test_coupons(function, benchmark_client)
+        elif function.tool == "get_all_products":
+            return execute_get_all_products(function, benchmark_client)
+    
+    # Standard SDK dispatch
     request_dict = function.model_dump()
     
     try:

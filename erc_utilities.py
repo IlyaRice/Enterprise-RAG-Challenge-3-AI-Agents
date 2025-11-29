@@ -13,6 +13,8 @@ Private helpers:
 - _visualize_task_scores() - Bar chart visualization
 """
 
+import json
+import os
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Any, List, Callable, Optional
@@ -135,6 +137,21 @@ def _repeat_task(benchmark: str, task_index: int, num_times: int) -> List[dict]:
     return results
 
 
+def _save_results(result: "RunResult", export_path: str, prefix: str):
+    """Save RunResult to JSON file."""
+    # Convert ISO timestamp to filename-safe format
+    timestamp = result.meta.started_at.replace(":", "-").replace(".", "-")
+    filename = f"{prefix}_{timestamp}.json"
+    filepath = os.path.join(export_path, filename)
+    
+    os.makedirs(export_path, exist_ok=True)
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(result.model_dump(), f, ensure_ascii=False, indent=2)
+    
+    print(f"Results saved to: {filepath}")
+
+
 def _visualize_task_scores(results: List[TaskResult], num_runs: int):
     """Visualize task scores with adaptive figure width."""
     import textwrap
@@ -192,7 +209,8 @@ def repeat_tasks(
     num_times: int,
     workspace: str = "test",
     name: str = "Standalone tasks",
-    architecture: str = "Multiagent"
+    architecture: str = "Multiagent",
+    export_path: Optional[str] = None
 ) -> RunResult:
     """
     Run multiple task specs, each N times in parallel.
@@ -204,6 +222,7 @@ def repeat_tasks(
         workspace: Workspace name (default: "test")
         name: Run name (default: "Standalone tasks")
         architecture: Architecture description (default: "Multiagent")
+        export_path: Optional path to save results as JSON
     
     Returns:
         RunResult with all results sorted by task_index, and consistent meta
@@ -248,6 +267,10 @@ def repeat_tasks(
     if len(task_indices) > 1:
         _visualize_task_scores(task_results, num_times)
     
+    # Export results if path provided
+    if export_path:
+        _save_results(result, export_path, "repeat_tasks")
+    
     return result
 
 
@@ -257,7 +280,8 @@ def _run_session(
     session_id: str,
     workspace: str,
     name: str,
-    architecture: str
+    architecture: str,
+    export_path: Optional[str] = None
 ) -> RunResult:
     """Run all tasks in a session in parallel."""
     started_at = datetime.now().isoformat()
@@ -331,7 +355,13 @@ def _run_session(
         started_at=started_at,
     )
     
-    return RunResult(results=task_results, meta=meta)
+    result = RunResult(results=task_results, meta=meta)
+    
+    # Export results if path provided
+    if export_path:
+        _save_results(result, export_path, "run_session")
+    
+    return result
 
 
 @observe()
@@ -339,7 +369,8 @@ def create_and_run_session(
     benchmark: str,
     workspace: str = "test",
     name: str = "I.R.",
-    architecture: str = "Multiagent oss-120b"
+    architecture: str = "Multiagent oss-120b",
+    export_path: Optional[str] = None
 ) -> RunResult:
     """
     Create a new session and run all tasks.
@@ -349,6 +380,7 @@ def create_and_run_session(
         workspace: Workspace name (default: "test")
         name: Session name (default: "I.R.")
         architecture: Architecture description (default: "Multiagent oss-120b")
+        export_path: Optional path to save results as JSON
     
     Returns:
         RunResult with all results sorted by task_index, and consistent meta
@@ -361,4 +393,4 @@ def create_and_run_session(
         architecture=architecture
     )
     print(f"Created session {session.session_id} with {session.task_count} tasks")
-    return _run_session(benchmark, session.session_id, workspace, name, architecture)
+    return _run_session(benchmark, session.session_id, workspace, name, architecture, export_path)

@@ -2,14 +2,15 @@
 Agent types and registry module.
 
 Contains:
-- AGENT_REGISTRY (replaces SUBAGENT_REGISTRY, unified for all agent types)
-- Agent configs (Orchestrator, ProductExplorer, BasketBuilder, CouponOptimizer, CheckoutProcessor)
+- AGENT_REGISTRY: Unified registry for all agent types (Orchestrator, ProductExplorer, etc.)
+- VALIDATOR_REGISTRY: Validators triggered by tools (not anchored to agents)
 - META_TOOLS tuple (for dispatch routing)
+- Helper functions for agent/validator lookup
 
-Note: TaskAnalyzer and BullshitCaller are "leaf agents" - not in registry.
-They are single LLM call agents that auto-terminate and don't go through the unified loop.
+Note: TaskAnalyzer is a "leaf agent" - single LLM call that auto-terminates.
+Validators (BullshitCaller, etc.) are in VALIDATOR_REGISTRY, triggered by tool types.
 
-Import hierarchy: This module imports from infrastructure.py and subagent_prompts.py
+Import hierarchy: This module imports from subagent_prompts.py
 """
 
 from subagent_prompts import (
@@ -23,6 +24,8 @@ from subagent_prompts import (
     system_prompt_checkout_processor, NextStepCheckoutProcessor,
     # Terminal actions
     CompleteTask, RefuseTask,
+    # Validators
+    system_prompt_bullshit_caller, bullshit_caller_schema,
 )
 
 
@@ -44,18 +47,43 @@ TERMINAL_ACTIONS = (CompleteTask, RefuseTask)
 
 
 # ============================================================================
+# VALIDATOR REGISTRY
+# ============================================================================
+# Validators are triggered by specific tools, not anchored to agents.
+# 
+# Each validator config contains:
+# - name: Display name (used in traces and logging)
+# - system_prompt: System prompt for the validator LLM call
+# - schema: Pydantic schema for structured LLM output
+# - triggers_on_tools: Tuple of tool classes that trigger this validator, or "*" for all
+# - applies_to_agents: Tuple of agent names, or "*" for all agents
+# - max_attempts: How many validation failures before forcing termination
+
+VALIDATOR_REGISTRY = {
+    "terminal_validator": {
+        "name": "BullshitCaller",
+        "system_prompt": system_prompt_bullshit_caller,
+        "schema": bullshit_caller_schema,
+        "triggers_on_tools": (CompleteTask, RefuseTask),
+        "applies_to_agents": "*",  # all agents
+        "max_attempts": 3,
+    },
+}
+
+
+# ============================================================================
 # AGENT REGISTRY
 # ============================================================================
-# Unified registry for all agent types. Replaces the old SUBAGENT_REGISTRY.
+# Unified registry for all agent types.
 # 
 # Each agent config contains:
 # - name: Display name (used in traces and logging)
 # - system_prompt: Base system prompt (will be appended with "first step")
 # - schema: Pydantic model for structured LLM output
 # - max_steps: Maximum iterations before timeout
-# - validator: Name of validator function ("bullshit_caller") or None
-# - max_validations: How many validation failures before forcing termination
 # - tool_type: "meta" for orchestrator (spawns subagents), "sdk" for subagents (calls SDK)
+#
+# Note: Validators are now in VALIDATOR_REGISTRY, triggered by tool types not agents.
 
 AGENT_REGISTRY = {
     # Orchestrator - coordinates sub-agents
@@ -64,8 +92,6 @@ AGENT_REGISTRY = {
         "system_prompt": system_prompt_orchestrator,
         "schema": NextStepOrchestrator,
         "max_steps": 30,
-        "validator": "bullshit_caller",
-        "max_validations": 3,
         "tool_type": "meta",
     },
     
@@ -75,8 +101,6 @@ AGENT_REGISTRY = {
         "system_prompt": system_prompt_product_explorer,
         "schema": NextStepProductExplorer,
         "max_steps": 30,
-        "validator": "bullshit_caller",
-        "max_validations": 2,
         "tool_type": "sdk",
     },
     
@@ -86,8 +110,6 @@ AGENT_REGISTRY = {
         "system_prompt": system_prompt_coupon_optimizer,
         "schema": NextStepCouponOptimizer,
         "max_steps": 30,
-        "validator": "bullshit_caller",
-        "max_validations": 2,
         "tool_type": "sdk",
     },
     
@@ -97,8 +119,6 @@ AGENT_REGISTRY = {
         "system_prompt": system_prompt_basket_builder,
         "schema": NextStepBasketBuilder,
         "max_steps": 30,
-        "validator": "bullshit_caller",
-        "max_validations": 2,
         "tool_type": "sdk",
     },
     
@@ -108,8 +128,6 @@ AGENT_REGISTRY = {
         "system_prompt": system_prompt_checkout_processor,
         "schema": NextStepCheckoutProcessor,
         "max_steps": 30,
-        "validator": "bullshit_caller",
-        "max_validations": 2,
         "tool_type": "sdk",
     },
 }
@@ -157,4 +175,36 @@ def is_meta_tool(function) -> bool:
 def is_terminal_action(function) -> bool:
     """Check if a function is a terminal action (CompleteTask/RefuseTask)."""
     return isinstance(function, TERMINAL_ACTIONS)
+
+
+# ============================================================================
+# VALIDATOR HELPER FUNCTIONS
+# ============================================================================
+
+def get_validators_for_tool(tool, agent_name: str) -> list:
+    """
+    Get list of validators that should trigger for a given tool and agent.
+    
+    Args:
+        tool: Tool instance (e.g., CompleteTask, ProductExplorer)
+        agent_name: Name of the agent calling the tool
+    
+    Returns:
+        List of validator config dicts that should trigger
+    """
+    matching_validators = []
+    
+    for validator_key, validator_config in VALIDATOR_REGISTRY.items():
+        # Check if tool matches triggers_on_tools
+        triggers = validator_config["triggers_on_tools"]
+        tool_matches = triggers == "*" or isinstance(tool, triggers)
+        
+        # Check if agent matches applies_to_agents
+        applies_to = validator_config["applies_to_agents"]
+        agent_matches = applies_to == "*" or agent_name in applies_to
+        
+        if tool_matches and agent_matches:
+            matching_validators.append(validator_config)
+    
+    return matching_validators
 
