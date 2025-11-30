@@ -394,120 +394,6 @@ def append_basket_state_if_needed(job_function, benchmark_client, benchmark: str
         return f"{original_txt}\n\nBasket contents:\n[Error fetching basket: {str(e)}. Please use Req_ViewBasket manually to verify.]"
 
 
-def execute_test_coupons(function, benchmark_client) -> dict:
-    """
-    Test multiple coupon codes and return comparison results.
-    Leaves basket in clean state (no coupon applied) after testing.
-    
-    Args:
-        function: Req_TestCoupons instance with coupons list
-        benchmark_client: SDK client for API calls
-    
-    Returns:
-        dict with:
-        - "text": formatted response string for conversation log
-        - "tool_call": {request, response} dict for trace
-    """
-    coupons = function.coupons
-    results = []
-    
-    for coupon_code in coupons:
-        try:
-            # Apply the coupon
-            benchmark_client.dispatch(store.Req_ApplyCoupon(coupon=coupon_code))
-            # Get basket state to measure effect
-            basket = benchmark_client.dispatch(store.Req_ViewBasket())
-            
-            result_entry = {
-                "coupon": coupon_code,
-                "valid": True,
-                "subtotal": basket.subtotal,
-                "discount": basket.discount or 0,
-                "total": basket.total,
-            }
-            results.append(result_entry)
-            
-        except ApiException as e:
-            error_msg = e.api_error.error if hasattr(e, 'api_error') else str(e)
-            results.append({
-                "coupon": coupon_code,
-                "valid": False,
-                "error": error_msg,
-            })
-    
-    # Cleanup: remove any active coupon to leave basket clean
-    try:
-        current_basket = benchmark_client.dispatch(store.Req_ViewBasket())
-        if current_basket.coupon:
-            benchmark_client.dispatch(store.Req_RemoveCoupon())
-    except Exception as e:
-        pass  # Best effort cleanup
-    
-    # Get final clean basket state
-    try:
-        final_basket = benchmark_client.dispatch(store.Req_ViewBasket())
-        final_basket_dict = final_basket.model_dump(exclude_none=True)
-    except Exception as e:
-        final_basket_dict = {"error": str(e)}
-    
-    # Format response
-    return _format_coupon_test_results(coupons, results, final_basket_dict)
-
-
-def _format_coupon_test_results(coupons: list, results: list, final_basket: dict) -> dict:
-    """Format coupon test results into readable text and structured data."""
-    lines = ["Coupon Test Results:", "-" * 30]
-    
-    coupons_with_discount = []
-    coupons_valid_no_discount = []
-    
-    for r in results:
-        if r["valid"]:
-            discount = r["discount"]
-            subtotal = r["subtotal"]
-            
-            if discount > 0:
-                pct = round(discount / subtotal * 100, 1) if subtotal > 0 else 0
-                lines.append(f"{r['coupon']}: Valid - Subtotal: {subtotal}, Discount: {discount} ({pct}%), Total: {r['total']}")
-                coupons_with_discount.append(r)
-            else:
-                lines.append(f"{r['coupon']}: Valid but no discount (Subtotal: {subtotal}, Total: {r['total']})")
-                coupons_valid_no_discount.append(r)
-        else:
-            lines.append(f"{r['coupon']}: Invalid - {r.get('error', 'Unknown error')}")
-    
-    # Summary
-    lines.append("")
-    if coupons_with_discount:
-        best = max(coupons_with_discount, key=lambda x: x["discount"])
-        lines.append(f"Best discount: {best['coupon']} (saves {best['discount']})")
-    elif coupons_valid_no_discount:
-        lines.append("All coupons valid but provide no discount for current basket")
-    else:
-        lines.append("No valid coupons found")
-    
-    # Final basket state (no coupon active)
-    lines.append("")
-    lines.append("Final Basket State (no coupon active):")
-    if "error" in final_basket:
-        lines.append(f"  Error: {final_basket['error']}")
-    else:
-        lines.append(f"  Items: {final_basket.get('items', [])}")
-        lines.append(f"  Subtotal: {final_basket.get('subtotal', 'N/A')}")
-        lines.append(f"  Coupon: {final_basket.get('coupon', 'None')}")
-        lines.append(f"  Total: {final_basket.get('total', 'N/A')}")
-    
-    text = "\n".join(lines)
-    
-    return {
-        "text": text,
-        "tool_call": {
-            "request": {"tool": "test_coupons", "coupons": coupons},
-            "response": {"results": results, "final_basket": final_basket}
-        }
-    }
-
-
 def execute_get_all_products(function, benchmark_client) -> dict:
     """
     Fetch all products from the catalog with automatic pagination.
@@ -580,6 +466,277 @@ def _format_all_products_result(products: list, pages_fetched: int) -> dict:
     }
 
 
+def execute_set_basket(function, benchmark_client) -> dict:
+    """
+    Set basket to exact contents: clear existing, add products, test/apply best coupon.
+    
+    Steps:
+    1. View current basket (to report what was cleared)
+    2. Remove all existing products
+    3. Remove existing coupon if any
+    4. Add new products (fail-fast on error)
+    5. Test all coupons if provided, apply best one
+    6. View final basket and return formatted result
+    
+    Args:
+        function: Req_SetBasket instance with products list and optional coupons list
+        benchmark_client: SDK client for API calls
+    
+    Returns:
+        dict with:
+        - "text": human-readable response for conversation log
+        - "tool_call": {request, response} dict for trace
+    """
+    products_to_add = function.products
+    coupons_to_test = function.coupons if function.coupons else None
+    
+    # Track what we're doing for the response
+    cleared_products = []
+    cleared_coupon = None
+    added_products = []
+    applied_coupon = None
+    coupon_test_results = []
+    error_message = None
+    
+    # Step 1: View current basket to know what to clear
+    try:
+        current_basket = benchmark_client.dispatch(store.Req_ViewBasket())
+        if current_basket.items:
+            cleared_products = [
+                {"sku": item.sku, "quantity": item.quantity}
+                for item in current_basket.items
+            ]
+        if current_basket.coupon:
+            cleared_coupon = current_basket.coupon
+    except ApiException as e:
+        # If we can't view basket, continue anyway - might be empty
+        pass
+    
+    # Step 2: Remove all existing products
+    for item in cleared_products:
+        try:
+            benchmark_client.dispatch(store.Req_RemoveItemFromBasket(
+                sku=item["sku"],
+                quantity=item["quantity"]
+            ))
+        except ApiException as e:
+            # Fail-fast on removal error
+            error_message = f"Failed to remove {item['sku']}: {e.api_error.error if hasattr(e, 'api_error') else str(e)}"
+            return _format_set_basket_result(
+                function, cleared_products, cleared_coupon, added_products, 
+                applied_coupon, [], 0, error_message, benchmark_client
+            )
+    
+    # Step 3: Remove existing coupon if any
+    if cleared_coupon:
+        try:
+            benchmark_client.dispatch(store.Req_RemoveCoupon())
+        except ApiException as e:
+            # Fail-fast on coupon removal error
+            error_message = f"Failed to remove coupon {cleared_coupon}: {e.api_error.error if hasattr(e, 'api_error') else str(e)}"
+            return _format_set_basket_result(
+                function, cleared_products, cleared_coupon, added_products,
+                applied_coupon, [], 0, error_message, benchmark_client
+            )
+    
+    # Step 4: Add new products (fail-fast)
+    for item in products_to_add:
+        try:
+            benchmark_client.dispatch(store.Req_AddProductToBasket(
+                sku=item.sku,
+                quantity=item.quantity
+            ))
+            added_products.append({"sku": item.sku, "quantity": item.quantity})
+        except ApiException as e:
+            error_message = f"Failed to add {item.sku}: {e.api_error.error if hasattr(e, 'api_error') else str(e)}"
+            return _format_set_basket_result(
+                function, cleared_products, cleared_coupon, added_products,
+                applied_coupon, [], 0, error_message, benchmark_client
+            )
+    
+    # Step 5: Test coupons and apply best one
+    best_coupon = None
+    best_discount = 0
+    
+    if coupons_to_test and len(coupons_to_test) > 0:
+        for coupon_code in coupons_to_test:
+            try:
+                # Apply the coupon
+                benchmark_client.dispatch(store.Req_ApplyCoupon(coupon=coupon_code))
+                # Get basket state to measure discount
+                basket = benchmark_client.dispatch(store.Req_ViewBasket())
+                
+                discount = basket.discount or 0
+                subtotal = basket.subtotal
+                
+                coupon_test_results.append({
+                    "coupon": coupon_code,
+                    "valid": True,
+                    "discount": discount,
+                    "subtotal": subtotal,
+                    "total": basket.total,
+                })
+                
+                # Track best discount
+                if discount > best_discount:
+                    best_discount = discount
+                    best_coupon = coupon_code
+                
+                # Remove coupon for next test
+                benchmark_client.dispatch(store.Req_RemoveCoupon())
+                
+            except ApiException as e:
+                error_msg = e.api_error.error if hasattr(e, 'api_error') else str(e)
+                coupon_test_results.append({
+                    "coupon": coupon_code,
+                    "valid": False,
+                    "error": error_msg,
+                })
+        
+        # Apply best coupon if it provides a discount
+        if best_coupon and best_discount > 0:
+            try:
+                benchmark_client.dispatch(store.Req_ApplyCoupon(coupon=best_coupon))
+                applied_coupon = best_coupon
+            except ApiException as e:
+                # Shouldn't happen since we just tested it successfully, but handle anyway
+                error_message = f"Failed to re-apply best coupon {best_coupon}: {e.api_error.error if hasattr(e, 'api_error') else str(e)}"
+                return _format_set_basket_result(
+                    function, cleared_products, cleared_coupon, added_products,
+                    applied_coupon, coupon_test_results, best_discount, error_message, benchmark_client
+                )
+    
+    # Success - format result
+    return _format_set_basket_result(
+        function, cleared_products, cleared_coupon, added_products,
+        applied_coupon, coupon_test_results, best_discount, None, benchmark_client
+    )
+
+
+def _format_set_basket_result(
+    function, 
+    cleared_products: list, 
+    cleared_coupon: str | None,
+    added_products: list,
+    applied_coupon: str | None,
+    coupon_test_results: list,
+    best_discount: float,
+    error_message: str | None,
+    benchmark_client
+) -> dict:
+    """Format set_basket results into human-readable text and structured data."""
+    lines = []
+    
+    # Report what was cleared
+    if cleared_products or cleared_coupon:
+        lines.append("Cleared from basket:")
+        for p in cleared_products:
+            lines.append(f"  - {p['quantity']}x {p['sku']}")
+        if cleared_coupon:
+            lines.append(f"  - Coupon: {cleared_coupon}")
+        if not cleared_products:
+            lines.append("  - (no products)")
+    else:
+        lines.append("Basket was already empty.")
+    
+    lines.append("")
+    
+    # Report what was added
+    if added_products:
+        lines.append("Added to basket:")
+        for p in added_products:
+            lines.append(f"  - {p['quantity']}x {p['sku']}")
+    else:
+        lines.append("No products added (basket cleared).")
+    
+    # Report coupon testing (if coupons were tested)
+    if coupon_test_results:
+        lines.append("\n" + "=" * 30)
+        lines.append("Coupon Test Results:")
+        
+        for r in coupon_test_results:
+            if r["valid"]:
+                discount = r["discount"]
+                if discount > 0:
+                    pct = round(discount / r["subtotal"] * 100, 1) if r.get("subtotal", 0) > 0 else 0
+                    lines.append(f"  {r['coupon']}: ${discount} discount ({pct}%), Total: ${r['total']}")
+                else:
+                    lines.append(f"  {r['coupon']}: Valid but no discount (Total: ${r['total']})")
+            else:
+                lines.append(f"  {r['coupon']}: Invalid - {r.get('error', 'Unknown error')}")
+        
+        # Summary of best coupon
+        lines.append("")
+        if applied_coupon:
+            lines.append(f"→ Best coupon applied: {applied_coupon} (saves ${best_discount})")
+        else:
+            if any(r["valid"] for r in coupon_test_results):
+                lines.append("→ No coupon applied (all valid coupons provide zero discount)")
+            else:
+                lines.append("→ No coupon applied (all coupons invalid)")
+    
+    # Report error if any
+    if error_message:
+        lines.append(f"\nERROR: {error_message}")
+        lines.append("Operation stopped at this point. Basket may be in partial state.")
+    
+    # Get final basket state
+    lines.append("\n" + "-" * 30)
+    lines.append("Final Basket State:")
+    try:
+        final_basket = benchmark_client.dispatch(store.Req_ViewBasket())
+        final_basket_dict = final_basket.model_dump(exclude_none=True)
+        
+        if final_basket.items:
+            for item in final_basket.items:
+                lines.append(f"  - {item.quantity}x {item.sku} @ {item.price} each")
+            lines.append(f"  Subtotal: {final_basket.subtotal}")
+            if final_basket.coupon:
+                lines.append(f"  Coupon: {final_basket.coupon}")
+            if final_basket.discount:
+                lines.append(f"  Discount: -{final_basket.discount}")
+            lines.append(f"  Total: {final_basket.total}")
+        else:
+            lines.append("  (empty)")
+            final_basket_dict = {"items": [], "subtotal": 0, "total": 0}
+    except Exception as e:
+        lines.append(f"  Error fetching final state: {str(e)}")
+        final_basket_dict = {"error": str(e)}
+    
+    text = "\n".join(lines)
+    
+    # Build request dict from function
+    request_dict = {
+        "tool": "set_basket",
+        "products": [{"sku": p.sku, "quantity": p.quantity} for p in function.products],
+        "coupons": function.coupons
+    }
+    
+    # Build response dict
+    response_dict = {
+        "cleared": {
+            "products": cleared_products,
+            "coupon": cleared_coupon
+        },
+        "added": {
+            "products": added_products,
+        },
+        "coupon_tests": coupon_test_results,
+        "best_coupon": {
+            "coupon": applied_coupon,
+            "discount": best_discount
+        } if applied_coupon else None,
+        "final_basket": final_basket_dict
+    }
+    if error_message:
+        response_dict["error"] = error_message
+    
+    return {
+        "text": text,
+        "tool_call": {"request": request_dict, "response": response_dict}
+    }
+
+
 def execute_single_call(function, benchmark_client, benchmark: str) -> dict:
     """
     Execute a single SDK tool call.
@@ -596,10 +753,10 @@ def execute_single_call(function, benchmark_client, benchmark: str) -> dict:
     """
     # Handle custom wrapper tools first
     if hasattr(function, 'tool'):
-        if function.tool == "test_coupons":
-            return execute_test_coupons(function, benchmark_client)
-        elif function.tool == "get_all_products":
+        if function.tool == "get_all_products":
             return execute_get_all_products(function, benchmark_client)
+        elif function.tool == "set_basket":
+            return execute_set_basket(function, benchmark_client)
     
     # Standard SDK dispatch
     request_dict = function.model_dump()

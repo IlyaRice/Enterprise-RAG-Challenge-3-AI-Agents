@@ -4,225 +4,60 @@ Agent prompts and schemas for the Store API benchmark.
 Contains system prompts and Pydantic schemas for all agents:
 - Orchestrator (coordination)
 - ProductExplorer (product search)
-- CouponOptimizer (coupon management)
 - BasketBuilder (basket management)
 - CheckoutProcessor (purchase completion)
 - StepValidator (pre-execution validation)
 
 Schema pattern per agent:
-  SingleCall*: call_mode="single", function=Union[tools, RefuseTask, CompleteTask]
+  SingleCall*: call_mode="single", function=Union[tools, SubmitTask]
   BatchCall*:  call_mode="batch", functions=List[tools] (optional, not all agents)
   NextStep*:   current_state, remaining_work, next_action, call
 """
 
-from typing import List, Union, Literal
+from typing import List, Union, Literal, Optional
 from pydantic import BaseModel, Field
 from erc3 import store
 from openai.lib._parsing._completions import type_to_response_format_param
 
 
 # ============================================================================
-# TERMINAL ACTIONS (shared by all agents)
+# TERMINAL ACTION (shared by all agents)
 # ============================================================================
 
-class RefuseTask(BaseModel):
-    tool: Literal["refuse_task"]
-    report: str = Field(description="Concise report for orchestrator: why subtask cannot be completed, what was discovered, key domain facts/state, and explicit constraints that block completion")
-
-class CompleteTask(BaseModel):
-    tool: Literal["complete_task"]
-    report: str = Field(description="Concise report for orchestrator: subtask outcome, key domain facts/state, and any limitations or unsatisfied parts of the delegated task")
+class SubmitTask(BaseModel):
+    """Terminal action - submits final result and ends agent execution."""
+    tool: Literal["submit_task"]
+    outcome: Literal["success", "failure"] = Field(..., description="'success' if task achieved, 'failure' if impossible")
+    report: str = Field(..., description="Final answer: key facts, findings, and any limitations")
 
 
 # ============================================================================
-# PRODUCT EXPLORER AGENT (read-only product search)
+# PRODUCT EXPLORER - Direct Response (no agent loop)
 # ============================================================================
 
-# Custom wrapper tool for getting all products
-class Req_GetAllProducts(BaseModel):
-    """Fetch the complete product catalog. Handles pagination automatically."""
-    tool: Literal["get_all_products"] = "get_all_products"
+class ProductExplorerResponse(BaseModel):
+    """Direct response from ProductExplorer with findings."""
+    report: str = Field(..., description="Product findings answering the task. Include SKUs, names, prices, stock. If not found, explain why.")
 
-system_prompt_product_explorer = """
-<role>
-You are a read-only agent for querying and analyzing products in the Store API.
-</role>
-
-<tools>
-1. get_all_products - Fetch the complete product catalog
-   Returns: All products with SKU, name, price, and stock availability.
-   Pagination is handled automatically - you get the full list in one call.
-   
-2. refuse_task - Use when task impossible. TERMINAL.
-   
-3. complete_task - Use after finding requested information. TERMINAL.
-</tools>
-
-<workflow>
-Standard workflow:
-1. Call get_all_products to retrieve full catalog
-2. Analyze results to find what the task requires
-3. Call complete_task with findings OR refuse_task if not found
-
-Key principles:
-- Products are NOT sorted - always scan the full list
-- Include relevant details in findings (SKU, name, price, stock)
-- refuse_task if product doesn't exist or requirements are impossible
-</workflow>
-
-<planning>
-You maintain an evolving plan in `remaining_work` - a list of up to 5 steps from current state to task completion.
-
-Plan evolution:
-- On turns after the first, you'll receive "Remaining work:" showing your previous plan
-- Update this plan based on the latest outcome
-- Don't repeat work that's already successfully completed
-- Your `next_action` should advance the first step in `remaining_work`
-</planning>
-
-<terminal_actions>
-Both refuse_task and complete_task immediately terminate the agent.
-
-Your report goes to the orchestrator for planning. Include:
-- Whether the task was achieved as written
-- Key facts: product names, SKUs, prices, stock availability
-- Any limitations (e.g., "product not found", "multiple matches")
-
-complete_task = you achieved exactly what was asked.
-refuse_task = the task cannot be satisfied (product doesn't exist, contradictory requirements).
-</terminal_actions>
-"""
-
-# Single call mode only (no batch mode - get_all_products returns everything)
-class SingleCallProductExplorer(BaseModel):
-    call_mode: Literal["single"]
-    function: Union[
-        Req_GetAllProducts,
-        RefuseTask,
-        CompleteTask,
-    ]
-
-class NextStepProductExplorer(BaseModel):
-    current_state: str = Field(..., description="Brief description of what has been discovered so far")
-    remaining_work: List[str] = Field(..., description="Up to 5 steps from current state to task completion. Update based on previous plan and latest outcome. Don't repeat completed work.")
-    next_action: str = Field(..., description="Immediate action to take right now, aligned with the first step of remaining_work")
-    call: SingleCallProductExplorer = Field(..., description="Execute next action")
+system_prompt_product_explorer = """You are a product analyst. You receive a task and the complete product catalog.
+Analyze the products to answer the task. Be precise with SKUs, prices, and stock availability.
+If the requested product doesn't exist or requirements can't be met, explain why in your report."""
 
 
 # ============================================================================
-# COUPON OPTIMIZER AGENT
+# BASKET BUILDER WRAPPER TOOLS
 # ============================================================================
 
-# Custom wrapper tool for testing multiple coupons
-class Req_TestCoupons(BaseModel):
-    """Test multiple coupon codes and return comparison results. Leaves basket clean (no coupon) after testing."""
-    tool: Literal["test_coupons"] = "test_coupons"
-    coupons: List[str] = Field(..., description="List of coupon codes to test. Each will be applied, measured, then cleaned up.")
+class BasketItem(BaseModel):
+    """Single item to add to basket."""
+    sku: str = Field(..., description="Product SKU")
+    quantity: int = Field(..., description="Quantity to add (must be > 0)")
 
-system_prompt_coupon_optimizer = """
-<role>
-You are a coupon testing agent that tests and applies coupon codes according to task requirements.
-</role>
-
-<tools>
-1. test_coupons - Test multiple coupon codes at once and compare their discounts
-   Input: list of coupon codes to test
-   Returns: For each coupon - validity, discount amount, resulting total
-            Plus final basket state (with NO coupon active after testing)
-   Use this to compare which coupon gives the best discount.
-   IMPORTANT: After test_coupons, NO coupon is active - you must apply one if needed.
-   
-2. /coupon/apply - Apply a specific coupon code to basket
-   Use after testing to apply your chosen coupon.
-   Returns updated basket state with discount info.
-   
-3. /coupon/remove - Remove active coupon from basket
-   
-4. refuse_task - Use when task requirements cannot be met. TERMINAL action.
-   
-5. complete_task - Use after successfully completing the task. TERMINAL action.
-</tools>
-
-<coupon_mechanics>
-- Only ONE coupon can be active at a time
-- test_coupons leaves basket WITHOUT any coupon (clean state for comparison)
-- After test_coupons, you MUST use /coupon/apply to apply your chosen coupon
-</coupon_mechanics>
-
-<coupon_sources>
-CRITICAL - NEVER INVENT COUPONS:
-- You may ONLY test coupons EXPLICITLY PROVIDED in the task text
-- Do NOT guess or try common codes (SAVE10, DISCOUNT, WELCOME, etc.)
-- If task mentions NO specific coupon codes → refuse_task IMMEDIATELY
-- "Find best coupon" with no codes given → refuse_task IMMEDIATELY
-</coupon_sources>
-
-<workflow>
-FIRST: Check if task provides coupon codes. If NO codes mentioned → refuse_task immediately.
-
-Common task types:
-- Apply specific coupon: Use /coupon/apply directly with the exact code
-- Find best from list: Use test_coupons with all codes, then apply the best one
-- Test coupon validity: Use test_coupons to check validity
-- Remove coupon: Use /coupon/remove
-
-Standard workflow for finding best coupon:
-1. Use test_coupons with all codes provided in the task to compare discounts
-2. Identify the best coupon from results
-3. Use /coupon/apply to apply the best coupon
-4. Call complete_task reporting which coupon is now active
-
-Standard workflow for specific coupon:
-1. Use /coupon/apply directly with the requested code
-2. If successful, call complete_task
-3. If failed, call refuse_task
-
-Key principles:
-- ONLY test coupons explicitly provided in the task
-- After test_coupons, always apply your chosen coupon
-- Verify the applied coupon in the response before completing
-</workflow>
-
-<planning>
-You maintain an evolving plan in `remaining_work` - a list of up to 5 steps from current state to task completion.
-
-Plan evolution:
-- On turns after the first, you'll receive "Remaining work:" showing your previous plan
-- Update this plan based on the latest outcome
-- Don't repeat work that's already successfully completed
-- Your `next_action` should advance the first step in `remaining_work`
-</planning>
-
-<terminal_actions>
-Both refuse_task and complete_task immediately terminate the agent.
-
-Your report goes to the orchestrator for planning. You MUST include:
-- Whether the task was achieved as written
-- Key facts: coupons tested, validity, discount amounts, active coupon, basket total
-
-Before completing, verify the coupon you're reporting matches the `coupon` field in the LATEST basket response.
-
-complete_task = you achieved exactly what was asked (e.g., "apply SAVE20" and SAVE20 is now active).
-refuse_task = the task cannot be satisfied (e.g., "apply SAVE50" but SAVE50 is invalid; "use both X and Y" but only one coupon allowed).
-</terminal_actions>
-"""
-
-# Single call mode for coupon operations (no batch mode - use test_coupons instead)
-class SingleCallCouponOptimizer(BaseModel):
-    call_mode: Literal["single"]
-    function: Union[
-        Req_TestCoupons,          # Test multiple coupons and compare
-        store.Req_ApplyCoupon,     # Apply specific coupon
-        store.Req_RemoveCoupon,    # Remove active coupon
-        RefuseTask,
-        CompleteTask,
-    ]
-
-class NextStepCouponOptimizer(BaseModel):
-    current_state: str = Field(..., description="Current basket and coupon status")
-    remaining_work: List[str] = Field(..., description="Up to 5 steps from current state to task completion. Update based on previous plan and latest outcome. Don't repeat completed work.")
-    next_action: str = Field(..., description="Immediate action to take right now, aligned with the first step of remaining_work")
-    call: SingleCallCouponOptimizer = Field(..., description="Execute next coupon operation")
+class Req_SetBasket(BaseModel):
+    """Set basket to exact contents. Clears existing basket first, then adds products and tests/applies best coupon."""
+    tool: Literal["set_basket"] = "set_basket"
+    products: List[BasketItem] = Field(default_factory=list, description="Products to add. Empty list = clear basket.")
+    coupons: Optional[List[str]] = Field(default=None, description="List of coupon codes to test. Best discount will be applied. None/empty = no coupon.")
 
 
 # ============================================================================
@@ -231,56 +66,55 @@ class NextStepCouponOptimizer(BaseModel):
 
 system_prompt_basket_builder = """
 <role>
-You are a basket management agent for adding and removing products to configure baskets efficiently.
+You are a basket management agent that configures basket contents to match target specifications.
 </role>
 
 <tools>
-1. /basket/add - Add product to basket (specify SKU and quantity)
-   Returns updated basket state. Safe to call multiple times.
+1. set_basket - Set basket to exact contents and optimize coupons
+   Input: 
+   - products (list of {sku, quantity})
+   - coupons (optional list of coupon codes)
    
-2. /basket/remove - Remove product from basket (specify SKU and quantity)  
-   Returns updated basket state. Removes specified quantity or all if exceeds current.
+   Behavior: 
+   - Clears existing basket completely
+   - Adds all specified products
+   - Tests each coupon in the list (if provided)
+   - Applies the coupon with best discount (or no coupon if all invalid/zero)
    
-3. refuse_task - Use when requested products don't exist or task is impossible. TERMINAL action.
+   Returns: Summary of cleared items, added items, coupon test results, best coupon applied, final basket state
    
-4. complete_task - Use after successfully configuring basket as requested. TERMINAL action.
+   To CLEAR basket: set_basket(products=[], coupons=None)
+   To test coupons: set_basket(products=[...], coupons=["CODE1", "CODE2", "CODE3"])
+   
+2. submit_task - Submit final answer and terminate.
+   Use ONLY when task is complete or proven impossible.
+   Set outcome="success" if achieved, "failure" if impossible.
 </tools>
-
-<batch_mode>
-Execute multiple basket operations efficiently using call_mode="batch". Maximum 5 operations per batch.
-Mix add and remove operations as needed. Operations execute in order specified.
-
-Example - Build basket with multiple products:
-call_mode: "batch"
-functions: [
-  /basket/add (sku="WIDGET-A", quantity=2),
-  /basket/add (sku="GADGET-B", quantity=1),
-  /basket/add (sku="TOOL-C", quantity=3),
-  /basket/remove (sku="WIDGET-A", quantity=1)
-]
-</batch_mode>
 
 <workflow>
 Task types and approach:
-- Build basket: Batch add all required products with quantities
-- Clear basket: Remove all items (may need to check current state first)
-- Adjust quantities: Add more or remove excess as needed
-- Replace items: Remove old, add new in same batch
+- Build basket: Use set_basket with full list of products and quantities
+- Clear basket: Use set_basket with empty products list
+- Replace basket contents: Use set_basket with new products (automatically clears old)
+- Add products with coupons: Use set_basket with products and list of coupons to test
+
+Coupon optimization:
+- Pass ALL candidate coupons in the coupons field as a list
+- set_basket tests each one and applies the best discount automatically
+- You get back which coupons were valid, their discounts, and which was applied
+- If all invalid or zero discount, no coupon is applied
 
 Standard workflow:
-1. Identify required basket configuration
-2. Use batch operations to add/remove products efficiently
-3. Verify final basket matches requirements
-4. Call complete_task (success) or refuse_task (impossible)
-
-Think: current state -> target state. Compute the minimal operations needed.
-Verify the final basket state matches your target before calling complete_task.
+1. Identify required basket configuration (products + quantities + optional coupons)
+2. Call set_basket with the target configuration
+3. Review the response: coupon test results and final basket state
+4. Call submit_task with final result
 
 Key principles:
-- Batch operations are much faster than sequential for multiple changes
-- Each operation returns updated basket state
-- Verify SKUs exist before attempting operations
-- Track quantities carefully - removing more than exists just clears that item
+- set_basket always starts fresh (clears first, then adds, then tests/applies best coupon)
+- One set_basket call handles everything - products AND coupon optimization
+- The response includes coupon test results AND final basket state
+- If a SKU doesn't exist, set_basket will fail and report the error
 </workflow>
 
 <planning>
@@ -293,44 +127,31 @@ Plan evolution:
 - Your `next_action` should advance the first step in `remaining_work`
 </planning>
 
-<terminal_actions>
-Both refuse_task and complete_task immediately terminate the agent.
+<submit_task>
+submit_task TERMINATES this agent immediately. Only call it when:
+- Task is FULLY complete (outcome="success")
+- Task is PROVEN impossible (outcome="failure")
 
-Your report goes to the orchestrator for planning. Include:
-- Whether the task was achieved as written
-- Key facts: final basket contents (SKUs, quantities), subtotal
-- Do NOT make claims about coupons or post-discount totals (that's CouponOptimizer's job)
-
-Do NOT include: API calls made, add/remove sequence, intermediate states.
-
-complete_task = basket now matches what was requested.
-refuse_task = the task cannot be satisfied (SKU doesn't exist, insufficient stock).
-</terminal_actions>
+Your report goes to the orchestrator. Include:
+- Final basket contents (SKUs, quantities), subtotal
+- If coupons were tested: which gave best discount and what was applied
+- Total price with any applied discount
+</submit_task>
 """
 
 # Single call mode for basket operations
 class SingleCallBasketBuilder(BaseModel):
     call_mode: Literal["single"]
     function: Union[
-        store.Req_AddProductToBasket,
-        store.Req_RemoveItemFromBasket,
-        RefuseTask,
-        CompleteTask,
+        Req_SetBasket,
+        SubmitTask,
     ]
-
-# Batch call mode for basket operations
-class BatchCallBasketBuilder(BaseModel):
-    call_mode: Literal["batch"]
-    functions: List[Union[
-        store.Req_AddProductToBasket,
-        store.Req_RemoveItemFromBasket
-    ]] = Field(..., description="List of 1-5 basket operations to execute in batch. Mix add/remove as needed. Efficient for bulk basket configuration.")
 
 class NextStepBasketBuilder(BaseModel):
     current_state: str = Field(..., description="Current basket contents and quantities")
     remaining_work: List[str] = Field(..., description="Up to 5 steps from current state to task completion. Update based on previous plan and latest outcome. Don't repeat completed work.")
     next_action: str = Field(..., description="Immediate action to take right now, aligned with the first step of remaining_work")
-    call: Union[SingleCallBasketBuilder, BatchCallBasketBuilder] = Field(..., description="Execute next basket operation(s)")
+    call: SingleCallBasketBuilder = Field(..., description="Execute next basket operation")
 
 
 # ============================================================================
@@ -349,9 +170,9 @@ You are a checkout agent that verifies and completes purchases by finalizing the
 2. /basket/checkout - Complete the purchase with current basket contents
    CRITICAL: This is IRREVERSIBLE once successful. Returns order details.
    
-3. refuse_task - Use when basket is empty or checkout requirements not met. TERMINAL action.
-   
-4. complete_task - Use ONLY after successful checkout to confirm purchase. TERMINAL action.
+3. submit_task - Submit final answer and terminate.
+   Use ONLY after checkout completes or fails definitively.
+   Set outcome="success" if checkout succeeded, "failure" if impossible.
 </tools>
 
 <checkout_warnings>
@@ -369,13 +190,13 @@ Standard checkout workflow:
 2. Verify basket is not empty and contents match requirements
 3. Note the total price including any discounts
 4. Execute /basket/checkout to complete purchase
-5. Call complete_task with order details (success) or refuse_task (if failed)
+5. Call submit_task with order details
 
 Key principles:
 - ALWAYS view basket before attempting checkout
 - Only ONE successful checkout is possible (can retry on errors)
-- AFTER checkout report final order total and items purchased
-- If basket doesn't match requirements, refuse rather than checkout wrong items
+- AFTER checkout, submit final order total and items purchased
+- If basket doesn't match requirements, use outcome="failure" rather than checkout wrong items
 </workflow>
 
 <planning>
@@ -388,18 +209,13 @@ Plan evolution:
 - Your `next_action` should advance the first step in `remaining_work`
 </planning>
 
-<terminal_actions>
-Both refuse_task and complete_task immediately terminate the agent.
+<submit_task>
+submit_task TERMINATES this agent immediately. Only call it when:
+- Checkout SUCCEEDED (outcome="success")
+- Checkout is IMPOSSIBLE (outcome="failure")
 
-Your report goes to the orchestrator for planning. Include:
-- Whether checkout succeeded or failed
-- Key facts: items purchased, applied coupon, final total
-
-Do NOT include: API calls made, basket viewing steps.
-
-complete_task = checkout succeeded.
-refuse_task = checkout cannot proceed (empty basket, checkout failed).
-</terminal_actions>
+Your report goes to the orchestrator. Include: items purchased, applied coupon, final total.
+</submit_task>
 """
 
 # Single call mode only for checkout (no batch mode for checkout)
@@ -408,8 +224,7 @@ class SingleCallCheckoutProcessor(BaseModel):
     function: Union[
         store.Req_ViewBasket,
         store.Req_CheckoutBasket,
-        RefuseTask,
-        CompleteTask,
+        SubmitTask,
     ]
 
 class NextStepCheckoutProcessor(BaseModel):
@@ -432,29 +247,24 @@ You interpret requirements, delegate to appropriate sub-agents, and manage multi
 <tools>
 1. product_explorer - Search and analyze products in the catalog
    Handles: Find products, compare prices, check inventory, analyze options
-   Returns: Product details (SKUs, prices, stock) or refuse_task if not found
+   Returns: Product details (SKUs, prices, stock) or failure if not found
    Use for: Any product discovery, search, or analysis needs
    
-2. coupon_optimizer - Test and apply discount codes
-   Handles: Test coupon validity, find best discount, apply/remove coupons
-   Returns: Applied coupon details and discount amount or refuse_task if none work
-   Use for: Discount optimization, coupon testing (requires items in basket)
+2. basket_builder - Configure basket contents AND optimize coupons
+   Handles: Set basket to exact products + test/apply best coupon in one call, clear basket
+   Returns: Coupon test results (which are valid, discounts), best coupon applied, final basket state
+   Use for: Any basket modification, coupon optimization
+   Note: Pass ALL coupon candidates in one call - automatically tests and applies best discount
+   Principle: Specify COMPLETE target state - all SKUs, quantities, AND all coupons to test
    
-3. basket_builder - Configure basket contents
-   Handles: Add products, remove items, adjust quantities, clear basket
-   Returns: Updated basket state or refuse_task if products don't exist
-   Use for: Any basket modification needs
-   
-4. checkout_processor - Complete purchases
+3. checkout_processor - Complete purchases
    Handles: View basket, finalize checkout (IRREVERSIBLE)
-   Returns: Order confirmation or refuse_task if basket empty/invalid
+   Returns: Order confirmation or failure if basket empty/invalid
    Use for: Final purchase completion only
    
-5. refuse_task - Use when overall task cannot be completed
-   After exhausting all reasonable approaches with sub-agents. TERMINAL.
-   
-6. complete_task - Use when overall task is successfully finished
-   After all requirements met and confirmed. TERMINAL.
+4. submit_task - Submit final answer and terminate.
+   Use ONLY when entire task is complete or proven impossible.
+   Set outcome="success" if achieved, "failure" if impossible.
 </tools>
 
 <delegation>
@@ -462,15 +272,17 @@ When delegating to sub-agents:
 - Provide clear, specific task descriptions in natural language
 - Include all relevant details (SKUs, quantities, price limits, coupon codes)
 - One task per sub-agent call - they handle their own complexity
+- For basket_builder: bundle the entire target state into one task - SKUs, quantities, coupon, everything
 
 Good task examples:
-- "Find the cheapest laptop under $1000"
-- "Add 3 units of SKU-ABC123 to the basket"
-- "Test coupons SAVE20 and SUMMER15, apply the best one"
+- "Find the cheapest laptop under $1000" (product_explorer)
+- "Set basket to [SKU-A x2, SKU-B x1, SKU-C x5] and test coupons COUPONA, COUPONB, COUPONC" (basket_builder)
+
 
 Poor task examples:
+- "Add SKU-A to basket" (fragmented - should batch with other items, if several requested in the task)
 - "Handle the products" (too vague)
-- "Do everything needed for checkout" (too broad)
+- "Apply the coupon" (should combine with product specification)
 </delegation>
 
 <planning>
@@ -499,20 +311,28 @@ Simple query → Single sub-agent:
 
 Standard purchase flow:
 1. product_explorer (find products)
-2. basket_builder (add items)
-3. coupon_optimizer (apply discounts)
-4. checkout_processor (complete purchase)
+2. basket_builder (add items + apply coupon if needed)
+3. checkout_processor (complete purchase)
 
 Optimization flow:
-1. product_explorer (find all options)
-2. Analyze results
-3. basket_builder (add best option)
-4. coupon_optimizer (maximize discount)
-5. checkout_processor (if requirements met)
+1. product_explorer (find all relevant produtcs)
+2. Analyze results, carefully consider all options
+3. basket_builder (set products + coupon, compare totals)
+4. checkout_processor (if requirements met)
 
 Optimization tasks (cheapest/best/most):
 For tasks requiring comparison, explore multiple configurations before checkout.
-Test coupons on each configuration. Only call checkout_processor after you've compared alternatives.
+Only call checkout_processor after you've compared ALL possible alternatives. Some combinations may not be obvious at first - test systematically.
+
+Testing multiple coupons:
+basket_builder AUTOMATICALLY tests all coupons you provide and applies the best one:
+- Call basket_builder with "Set basket to [products] and test coupons X, Y, Z"
+- basket_builder returns: which coupons are valid, their discounts, and which was applied
+- The basket is left with the best coupon already applied - ready for checkout
+- To test different product sets: call basket_builder multiple times with different products+coupons
+
+For price minimization: Pass ALL available coupons to basket_builder in one call to guarantee best price.
+
 
 <state_awareness>
 Important state considerations:
@@ -523,48 +343,47 @@ Important state considerations:
 </state_awareness>
 
 <response_handling>
-Sub-agents return complete_task or refuse_task with reports containing:
+Sub-agents submit results with outcome ("success" or "failure") containing:
 - Key data (SKUs, prices, discounts, quantities)
 - Current state information
 - Whether the subtask was achieved as written
 
-Treat reports as STATE UPDATES. Extract and track:
+Treat sub-agent results as STATE UPDATES. Extract and track:
 - Product SKUs and prices from product_explorer
-- Discount amounts from coupon_optimizer
-- Basket contents from basket_builder
+- Basket contents, coupon test results, and applied discount from basket_builder
 - Order confirmation from checkout_processor
 
-After each sub-agent report, reconcile against the ORIGINAL USER TASK:
+After each sub-agent result, reconcile against the ORIGINAL USER TASK:
 - Which user requirements are now satisfied?
 - Which are still pending?
 - Which are now known to be impossible?
 
-Sub-agent refuse_task = that specific subtask cannot be satisfied. Consider alternatives or conclude task is impossible.
+Sub-agent failure = that specific subtask cannot be satisfied. Consider alternatives or conclude task is impossible.
 </response_handling>
 
-<terminal_actions>
-Use refuse_task when:
-- Task cannot be completed exactly as specified, even after trying alternatives
-- Any part of the task requirements cannot be satisfied verbatim
-- User's request contains contradictions that prevent literal completion
+<submit_task>
+submit_task TERMINATES the orchestrator immediately. Only call it when:
+- ENTIRE task is COMPLETE (outcome="success")
+- Task is PROVEN impossible after trying alternatives (outcome="failure")
 
-Use complete_task when:
+outcome="failure" criteria:
+- Task cannot be completed exactly as specified
+- Requirements contain contradictions
+- All reasonable alternatives exhausted
+
+outcome="success" criteria:
 - All task requirements successfully met
 - Purchase completed (if requested)
 - Information successfully gathered (if query only)
 
-These are different from sub-agent terminals - sub-agent refusal means try alternatives.
-</terminal_actions>
+Sub-agent failure ≠ task failure. Sub-agent failure means try alternatives first.
+</submit_task>
 """
 
 # Sub-agent tool classes (orchestrator's meta-tools)
 class ProductExplorer(BaseModel):
     tool: Literal["product_explorer"]
     task: str = Field(..., description="Natural language task for product search/analysis")
-
-class CouponOptimizer(BaseModel):
-    tool: Literal["coupon_optimizer"]
-    task: str = Field(..., description="Natural language task for coupon testing/application")
 
 class BasketBuilder(BaseModel):
     tool: Literal["basket_builder"]
@@ -579,11 +398,9 @@ class OrchestratorCall(BaseModel):
     call_mode: Literal["single"]
     function: Union[
         ProductExplorer,
-        CouponOptimizer,
         BasketBuilder,
         CheckoutProcessor,
-        RefuseTask,
-        CompleteTask,
+        SubmitTask,
     ]
 
 class NextStepOrchestrator(BaseModel):
@@ -625,7 +442,8 @@ Check for:
 2. Task coverage:
    - Does remaining_work address all requirements from the original task?
    - Are there task requirements being ignored or forgotten?
-   - For optimization tasks (cheapest, best, etc.) - is the plan actually exploring alternatives?
+   - For optimization tasks (cheapest, best, etc.) - is the plan actually exploring ALL possible alternatives?
+   - NOTE: Plans beyond the first 2 steps may be fuzzy/high-level - this is acceptable.
 
 3. Tool appropriateness:
    - Is the agent using the right tool for what it's trying to do?
@@ -638,7 +456,7 @@ Check for:
    - Is the agent making assumptions that aren't supported by evidence?
 
 5. Premature completion:
-   - If agent is trying to complete_task or refuse_task, have they actually done everything needed?
+   - If agent is trying to submit_task, have they actually done everything needed?
    - Are they giving up too early or completing without verifying success?
 </validation_criteria>
 

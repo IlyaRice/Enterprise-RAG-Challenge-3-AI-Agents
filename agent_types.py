@@ -13,14 +13,12 @@ Import hierarchy: This module imports from subagent_prompts.py
 from subagent_prompts import (
     # Orchestrator
     system_prompt_orchestrator, NextStepOrchestrator,
-    ProductExplorer, CouponOptimizer, BasketBuilder, CheckoutProcessor,
+    ProductExplorer, BasketBuilder, CheckoutProcessor,
     # Sub-agents (using consistent naming)
-    system_prompt_product_explorer, NextStepProductExplorer,
-    system_prompt_coupon_optimizer, NextStepCouponOptimizer,
     system_prompt_basket_builder, NextStepBasketBuilder,
     system_prompt_checkout_processor, NextStepCheckoutProcessor,
-    # Terminal actions
-    CompleteTask, RefuseTask,
+    # Terminal action
+    SubmitTask,
     # Validators
     system_prompt_step_validator, step_validator_schema,
 )
@@ -32,15 +30,15 @@ from subagent_prompts import (
 # These are orchestrator tools that spawn sub-agents instead of calling SDK.
 # Used by execute_tool_dispatch() for routing decisions.
 
-META_TOOLS = (ProductExplorer, CouponOptimizer, BasketBuilder, CheckoutProcessor)
+META_TOOLS = (ProductExplorer, BasketBuilder, CheckoutProcessor)
 
 
 # ============================================================================
-# TERMINAL ACTIONS
+# TERMINAL ACTION
 # ============================================================================
-# These mark the end of an agent's execution.
+# Marks the end of an agent's execution.
 
-TERMINAL_ACTIONS = (CompleteTask, RefuseTask)
+TERMINAL_ACTIONS = (SubmitTask,)
 
 
 # ============================================================================
@@ -92,25 +90,7 @@ AGENT_REGISTRY = {
         "tool_type": "meta",
     },
     
-    # ProductExplorer - search and analyze products (read-only)
-    "ProductExplorer": {
-        "name": "ProductExplorer",
-        "system_prompt": system_prompt_product_explorer,
-        "schema": NextStepProductExplorer,
-        "max_steps": 30,
-        "tool_type": "sdk",
-    },
-    
-    # CouponOptimizer - test and apply discount codes
-    "CouponOptimizer": {
-        "name": "CouponOptimizer",
-        "system_prompt": system_prompt_coupon_optimizer,
-        "schema": NextStepCouponOptimizer,
-        "max_steps": 30,
-        "tool_type": "sdk",
-    },
-    
-    # BasketBuilder - add/remove products from basket
+    # BasketBuilder - configure basket contents and apply coupons
     "BasketBuilder": {
         "name": "BasketBuilder",
         "system_prompt": system_prompt_basket_builder,
@@ -135,10 +115,9 @@ AGENT_REGISTRY = {
 # ============================================================================
 # Maps orchestrator meta-tool classes to agent registry keys.
 # Used when orchestrator delegates to a sub-agent.
+# Note: ProductExplorer handled specially in execute_meta_tool, not in registry.
 
 SUBAGENT_TYPE_MAP = {
-    ProductExplorer: "ProductExplorer",
-    CouponOptimizer: "CouponOptimizer",
     BasketBuilder: "BasketBuilder",
     CheckoutProcessor: "CheckoutProcessor",
 }
@@ -149,7 +128,7 @@ def get_subagent_config(meta_tool_instance) -> dict:
     Get agent configuration for a meta-tool instance.
     
     Args:
-        meta_tool_instance: Instance of ProductExplorer, CouponOptimizer, etc.
+        meta_tool_instance: Instance of ProductExplorer, BasketBuilder, etc.
     
     Returns:
         Agent config dict from AGENT_REGISTRY
@@ -170,7 +149,7 @@ def is_meta_tool(function) -> bool:
 
 
 def is_terminal_action(function) -> bool:
-    """Check if a function is a terminal action (CompleteTask/RefuseTask)."""
+    """Check if a function is a terminal action (SubmitTask)."""
     return isinstance(function, TERMINAL_ACTIONS)
 
 
@@ -183,7 +162,7 @@ def get_validators_for_tool(tool, agent_name: str) -> list:
     Get list of validators that should trigger for a given tool and agent.
     
     Args:
-        tool: Tool instance (e.g., CompleteTask, ProductExplorer)
+        tool: Tool instance (e.g., SubmitTask, ProductExplorer)
         agent_name: Name of the agent calling the tool
     
     Returns:

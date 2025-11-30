@@ -37,8 +37,8 @@ from agent_execution import (
     run_agent_loop,
 )
 
-# Import terminal actions for handle_task_completion
-from subagent_prompts import CompleteTask, RefuseTask
+# Import terminal action for handle_task_completion
+from subagent_prompts import SubmitTask
 
 
 # ============================================================================
@@ -46,7 +46,7 @@ from subagent_prompts import CompleteTask, RefuseTask
 # ============================================================================
 
 def handle_task_completion(
-    function,
+    function: SubmitTask,
     task: TaskInfo,
     erc_client: ERC3,
     trace: List[dict],
@@ -54,10 +54,10 @@ def handle_task_completion(
     orchestrator_log: List[dict] = None
 ) -> dict:
     """
-    Handle CompleteTask or RefuseTask terminal actions and return final result.
+    Handle SubmitTask terminal action and return final result.
     
     Args:
-        function: CompleteTask or RefuseTask instance
+        function: SubmitTask instance with outcome and report
         task: Task being completed
         erc_client: ERC3 client for task completion API
         trace: Trace of all events
@@ -67,14 +67,8 @@ def handle_task_completion(
     Returns:
         Result dict with task_id, task_text, benchmark, trace, code, summary, score, eval_logs
     """
-    # Determine success/failure and extract report
-    if isinstance(function, CompleteTask):
-        code = "completed"
-    elif isinstance(function, RefuseTask):
-        code = "refused"
-    else:
-        code = "failed"
-    
+    # Determine code from outcome
+    code = "completed" if function.outcome == "success" else "refused"
     report_text = function.report
 
     # Complete task and get evaluation
@@ -161,10 +155,8 @@ def run_orchestrator(erc_client: ERC3, task: TaskInfo, benchmark_client) -> dict
         )
         
         # Create terminal action for handle_task_completion
-        if result["status"] == "completed":
-            terminal_action = CompleteTask(tool="complete_task", report=result["report"])
-        else:
-            terminal_action = RefuseTask(tool="refuse_task", report=result["report"])
+        outcome = "success" if result["status"] == "completed" else "failure"
+        terminal_action = SubmitTask(tool="submit_task", outcome=outcome, report=result["report"])
         
         if config.VERBOSE:
             print()

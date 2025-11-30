@@ -24,7 +24,7 @@ from infrastructure import (
     # Trace helpers
     next_node_id, create_trace_event, create_validator_event,
     # SDK execution
-    execute_single_call, execute_batch,
+    execute_single_call, execute_batch, execute_get_all_products,
     # Conversation utilities
     build_subagent_context, format_subagent_result, inject_plan,
     # Task context for LLM logging
@@ -42,8 +42,10 @@ from agent_types import (
 from subagent_prompts import (
     # Validators
     StepValidatorResponse,
-    # Terminal actions
-    CompleteTask, RefuseTask,
+    # Terminal action
+    SubmitTask,
+    # ProductExplorer
+    ProductExplorerResponse, ProductExplorer,
 )
 
 
@@ -410,6 +412,126 @@ def execute_sdk_tools(
         raise ValueError(f"Unknown call_mode: {job.call.call_mode}")
 
 
+@observe()
+def execute_product_explorer_direct(
+    task_string: str,
+    orchestrator_log: List[dict],
+    benchmark_client,
+    trace: List[dict],
+    parent_node_id: str,
+    task_ctx: TaskContext = None,
+) -> dict:
+    """
+    Execute ProductExplorer with single LLM call (no agent loop).
+    
+    Automatically fetches all products and asks LLM to analyze them.
+    
+    Args:
+        task_string: The task for ProductExplorer
+        orchestrator_log: Orchestrator's full conversation (for context building)
+        benchmark_client: SDK client for API calls
+        trace: Trace list to append events to
+        parent_node_id: Orchestrator's node ID (e.g., "2")
+        task_ctx: TaskContext for logging LLM usage to ERC3 platform
+    
+    Returns:
+        dict with subagent_name="ProductExplorer", status="completed", report=...
+    """
+    # Generate node ID for this call
+    node_id = next_node_id(parent_node_id, 0)
+    
+    # Step 1: Fetch all products automatically
+    products_result = execute_get_all_products(None, benchmark_client)
+    products_text = products_result["text"]
+    
+    # Step 2: Build context for LLM
+    subagent_context = build_subagent_context(orchestrator_log, task_string)
+    
+    # Step 3: Build prompt with task + products
+    user_message = f"""{subagent_context}
+
+PRODUCT CATALOG:
+{products_text}
+
+Analyze the products above and answer the task."""
+    
+    # Step 4: Single LLM call with simple schema
+    from subagent_prompts import system_prompt_product_explorer
+    schema = type_to_response_format_param(ProductExplorerResponse)
+    
+    llm_start = time.time()
+    
+    try:
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt_product_explorer},
+                {"role": "user", "content": user_message},
+            ],
+            response_format=schema,
+            extra_body={
+                "provider": LLM_PROVIDER,
+            },
+        )
+        
+        llm_duration = time.time() - llm_start
+        
+        # Log LLM usage to ERC3 platform
+        if task_ctx:
+            task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
+        
+        content = response.choices[0].message.content
+        parsed = ProductExplorerResponse.model_validate_json(content)
+        reasoning = getattr(response.choices[0].message, 'reasoning', None)
+        
+        # Step 5: Log to trace
+        trace.append(create_trace_event(
+            node_id=node_id,
+            parent_node_id=parent_node_id,
+            sibling_index=0,
+            context="ProductExplorer",
+            system_prompt=system_prompt_product_explorer,
+            input_messages=[{"role": "user", "content": user_message}],
+            output=parsed.model_dump(),
+            reasoning=reasoning,
+            timing=llm_duration,
+            event_type="agent_step",
+            tool_calls=[products_result["tool_call"]],
+        ))
+        
+        if config.VERBOSE:
+            print(f"  {node_id} ProductExplorer ({llm_duration:.2f}s)")
+        
+        # Step 6: Return result
+        return {
+            "subagent_name": "ProductExplorer",
+            "status": "completed",
+            "report": parsed.report,
+        }
+        
+    except Exception as e:
+        # On error, return refusal
+        error_report = f"Failed to analyze products: {str(e)}"
+        trace.append(create_trace_event(
+            node_id=node_id,
+            parent_node_id=parent_node_id,
+            sibling_index=0,
+            context="ProductExplorer",
+            system_prompt=system_prompt_product_explorer,
+            input_messages=[{"role": "user", "content": user_message}],
+            output={"error": str(e)},
+            reasoning=None,
+            timing=time.time() - llm_start,
+            event_type="agent_step",
+        ))
+        
+        return {
+            "subagent_name": "ProductExplorer",
+            "status": "refused",
+            "report": error_report,
+        }
+
+
 def execute_meta_tool(
     meta_tool_instance,
     orchestrator_log: List[dict],
@@ -421,10 +543,11 @@ def execute_meta_tool(
     """
     Execute a meta-tool by spawning a sub-agent.
     
-    This recursively calls run_agent_loop for the appropriate sub-agent type.
+    ProductExplorer is handled specially with execute_product_explorer_direct().
+    Other subagents use run_agent_loop.
     
     Args:
-        meta_tool_instance: Instance of ProductExplorer, CouponOptimizer, etc.
+        meta_tool_instance: Instance of ProductExplorer, BasketBuilder, etc.
         orchestrator_log: Orchestrator's full conversation (for context building)
         benchmark_client: SDK client for sub-agent to use
         trace: Trace list to append events to
@@ -434,6 +557,17 @@ def execute_meta_tool(
     Returns:
         dict with subagent_name, status, report
     """
+    # Special handling for ProductExplorer
+    if isinstance(meta_tool_instance, ProductExplorer):
+        return execute_product_explorer_direct(
+            task_string=meta_tool_instance.task,
+            orchestrator_log=orchestrator_log,
+            benchmark_client=benchmark_client,
+            trace=trace,
+            parent_node_id=parent_node_id,
+            task_ctx=task_ctx,
+        )
+    
     # Get the task string from the meta-tool
     task_string = meta_tool_instance.task
     
@@ -568,7 +702,7 @@ def run_agent_loop(
         
         # Handle terminal actions
         if is_terminal_action(function_to_execute):
-            action_type = "✓" if isinstance(function_to_execute, CompleteTask) else "✗"
+            action_type = "✓" if function_to_execute.outcome == "success" else "✗"
             if config.VERBOSE:
                 print(f"  {node_id} {action_type} {function_to_execute.report}")
             
@@ -586,8 +720,8 @@ def run_agent_loop(
                 event_type="agent_step",
             ))
             
-            # Agent terminates
-            status = "completed" if isinstance(function_to_execute, CompleteTask) else "refused"
+            # Agent terminates - map outcome to status
+            status = "completed" if function_to_execute.outcome == "success" else "refused"
             report = function_to_execute.report
             
             result = {"status": status, "report": report}
@@ -597,7 +731,12 @@ def run_agent_loop(
         
         # Handle meta-tools (orchestrator delegating to subagent)
         if tool_type == "meta" and is_meta_tool(function_to_execute):
-            subagent_name = get_subagent_config(function_to_execute)["name"]
+            # Get subagent name (ProductExplorer handled specially, others from registry)
+            if isinstance(function_to_execute, ProductExplorer):
+                subagent_name = "ProductExplorer"
+            else:
+                subagent_name = get_subagent_config(function_to_execute)["name"]
+            
             task_string = function_to_execute.task
             
             if config.VERBOSE:
