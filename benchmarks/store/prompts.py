@@ -480,3 +480,4 @@ class StepValidatorResponse(BaseModel):
     rejection_message: str = Field(default="", description="If is_valid=False, what's wrong and what to consider instead")
 
 step_validator_schema = type_to_response_format_param(StepValidatorResponse)
+

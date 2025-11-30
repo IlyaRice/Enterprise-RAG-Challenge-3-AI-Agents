@@ -1,16 +1,14 @@
 """
-Agent types and registry module.
+Agent types and registry module for the Store benchmark.
 
 Contains:
 - AGENT_REGISTRY: Unified registry for all agent types (Orchestrator, ProductExplorer, etc.)
 - VALIDATOR_REGISTRY: Validators triggered by tools (not anchored to agents)
 - META_TOOLS tuple (for dispatch routing)
 - Helper functions for agent/validator lookup
-
-Import hierarchy: This module imports from subagent_prompts.py
 """
 
-from subagent_prompts import (
+from .prompts import (
     # Orchestrator
     system_prompt_orchestrator, NextStepOrchestrator,
     ProductExplorer, BasketBuilder, CheckoutProcessor,

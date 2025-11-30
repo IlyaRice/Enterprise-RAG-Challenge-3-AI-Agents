@@ -4,15 +4,14 @@ Agent execution module.
 Contains:
 - run_agent_loop() - THE unified loop for all agents
 - validate_and_retry_step() - Pre-execution validation with retry
-- execute_tool_dispatch() - routes to SDK or meta-tool
 - execute_meta_tool() - spawns child agent (recursive)
 - run_step_validator() - pre-execution plan validation (StepValidator)
 
-Import hierarchy: This module imports from infrastructure.py and agent_types.py
+Import hierarchy: This module imports from infrastructure.py and benchmarks.store
 """
 
 import time
-from typing import List, Union, Callable
+from typing import List, Callable
 from langfuse import observe
 from openai.lib._parsing._completions import type_to_response_format_param
 
@@ -23,8 +22,6 @@ from infrastructure import (
     get_next_step,
     # Trace helpers
     next_node_id, create_trace_event, create_validator_event,
-    # SDK execution
-    execute_single_call, execute_batch, execute_get_all_products,
     # Conversation utilities
     build_subagent_context, format_subagent_result, inject_plan,
     # Task context for LLM logging
@@ -32,21 +29,21 @@ from infrastructure import (
     # Errors
     AgentStepLimitError,
 )
-from agent_types import (
-    AGENT_REGISTRY,
+
+# Import from store benchmark (execute_meta_tool is store-specific)
+from benchmarks.store.agent_config import (
     VALIDATOR_REGISTRY,
-    META_TOOLS, TERMINAL_ACTIONS,
     is_meta_tool, is_terminal_action,
     get_subagent_config,
 )
-from subagent_prompts import (
+from benchmarks.store.prompts import (
     # Validators
     StepValidatorResponse,
-    # Terminal action
-    SubmitTask,
     # ProductExplorer
     ProductExplorerResponse, ProductExplorer,
+    system_prompt_product_explorer,
 )
+from benchmarks.store.tools import execute_get_all_products, execute_store_tools
 
 
 # ============================================================================
@@ -261,7 +258,6 @@ def validate_and_retry_step(
         }
     
     # Find StepValidator for this agent/tool (excluding terminal_validator by name)
-    from agent_types import VALIDATOR_REGISTRY
     step_validators = []
     for key, validator_cfg in VALIDATOR_REGISTRY.items():
         if validator_cfg["name"] == "StepValidator":
@@ -368,49 +364,8 @@ def validate_and_retry_step(
 
 
 # ============================================================================
-# TOOL EXECUTION
+# META-TOOL EXECUTION (Store-specific)
 # ============================================================================
-
-def execute_sdk_tools(
-    job,
-    benchmark_client,
-    benchmark: str,
-) -> dict:
-    """
-    Execute SDK tool(s) from agent's job output.
-    
-    Handles both single and batch call modes.
-    
-    Args:
-        job: Parsed LLM output with call.function or call.functions
-        benchmark_client: SDK client for API calls
-        benchmark: Benchmark name (e.g., "store")
-    
-    Returns:
-        dict with:
-        - "text": Formatted response for conversation
-        - "tool_calls": List of {request, response} dicts for trace
-        - "function": The function(s) executed (for display)
-    """
-    if job.call.call_mode == "single":
-        function = job.call.function
-        result = execute_single_call(function, benchmark_client, benchmark)
-        return {
-            "text": result["text"],
-            "tool_calls": [result["tool_call"]],
-            "function": function,
-        }
-    elif job.call.call_mode == "batch":
-        functions = job.call.functions
-        result = execute_batch(functions, benchmark_client, benchmark)
-        return {
-            "text": result["text"],
-            "tool_calls": result["tool_calls"],
-            "function": functions,
-        }
-    else:
-        raise ValueError(f"Unknown call_mode: {job.call.call_mode}")
-
 
 @observe()
 def execute_product_explorer_direct(
@@ -456,7 +411,6 @@ PRODUCT CATALOG:
 Analyze the products above and answer the task."""
     
     # Step 4: Single LLM call with simple schema
-    from subagent_prompts import system_prompt_product_explorer
     schema = type_to_response_format_param(ProductExplorerResponse)
     
     llm_start = time.time()
@@ -538,6 +492,7 @@ def execute_meta_tool(
     benchmark_client,
     trace: List[dict],
     parent_node_id: str,
+    tool_executor: Callable,
     task_ctx: TaskContext = None,
 ) -> dict:
     """
@@ -552,6 +507,7 @@ def execute_meta_tool(
         benchmark_client: SDK client for sub-agent to use
         trace: Trace list to append events to
         parent_node_id: Orchestrator's node ID (e.g., "2")
+        tool_executor: Function to execute SDK tools (passed to subagent loop)
         task_ctx: TaskContext for logging LLM usage to ERC3 platform
     
     Returns:
@@ -586,6 +542,7 @@ def execute_meta_tool(
         parent_node_id=parent_node_id,
         orchestrator_log=None,  # Subagents don't pass this down
         task_ctx=task_ctx,
+        tool_executor=tool_executor,
     )
     
     return {
@@ -608,6 +565,7 @@ def run_agent_loop(
     parent_node_id: str,
     orchestrator_log: List[dict] | None = None,
     task_ctx: TaskContext = None,
+    tool_executor: Callable = None,
 ) -> dict:
     """
     THE unified agent loop that works for both orchestrator and subagents.
@@ -627,6 +585,7 @@ def run_agent_loop(
         parent_node_id: Parent's node ID ("0" for orchestrator, "N" for subagent under step N)
         orchestrator_log: Orchestrator's full log (only for orchestrator, None for subagents)
         task_ctx: TaskContext for logging LLM usage to ERC3 platform
+        tool_executor: Function to execute SDK tools (benchmark-specific)
     
     Returns:
         dict with status, report (and for orchestrator: orchestrator_log)
@@ -751,6 +710,7 @@ def run_agent_loop(
                 benchmark_client=benchmark_client,
                 trace=trace,
                 parent_node_id=node_id,
+                tool_executor=tool_executor,
                 task_ctx=task_ctx,
             )
             
@@ -798,7 +758,7 @@ def run_agent_loop(
             continue
         
         # Handle SDK tools (subagent executing SDK calls)
-        sdk_result = execute_sdk_tools(job, benchmark_client, "store")
+        sdk_result = tool_executor(job, benchmark_client)
         
         # Log the agent step with tool_calls attached
         trace.append(create_trace_event(
@@ -846,4 +806,3 @@ def run_agent_loop(
     
     # Agent exceeded step limit
     raise AgentStepLimitError(f"Agent {agent_name} exceeded {max_steps}-step limit without completing")
-
