@@ -10,7 +10,7 @@ Contains store-specific tool implementations:
 """
 
 from erc3 import store, ApiException
-from infrastructure import dispatch_with_timeout
+from infrastructure import dispatch_with_timeout, execute_sdk_call
 
 
 # ============================================================================
@@ -424,27 +424,13 @@ def execute_single_call(function, benchmark_client) -> dict:
         elif function.tool == "set_basket":
             return execute_set_basket(function, benchmark_client)
     
-    # Standard SDK dispatch
-    request_dict = function.model_dump()
+    # Standard SDK dispatch via shared infrastructure
+    result = execute_sdk_call(function, benchmark_client)
     
-    try:
-        result = dispatch_with_timeout(benchmark_client, function)
-        txt = result.model_dump_json(exclude_none=True, exclude_unset=True)
-        response_dict = result.model_dump(exclude_none=True, exclude_unset=True)
-    except TimeoutError as e:
-        txt = f'{{"error": "{str(e)}"}}'
-        response_dict = {"error": str(e)}
-    except ApiException as e:
-        txt = e.detail
-        response_dict = {"error": e.detail}
-
-    # Automatically append basket state after state-changing operations
-    txt = append_basket_state_if_needed(function, benchmark_client, txt)
+    # Store-specific: auto-append basket state after state-changing operations
+    result["text"] = append_basket_state_if_needed(function, benchmark_client, result["text"])
     
-    return {
-        "text": txt,
-        "tool_call": {"request": request_dict, "response": response_dict}
-    }
+    return result
 
 
 def execute_batch(functions_list, benchmark_client) -> dict:

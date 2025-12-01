@@ -1,4 +1,9 @@
+wiki/
 misc/
+
+# ERC3 wiki cache (regenerable via benchmarks.erc3.wiki.ingest_wikis)
+benchmarks/erc3/wiki_data/*
+!benchmarks/erc3/wiki_data/.gitkeep
 
 # Project specific ignores
 .cursor/

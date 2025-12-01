@@ -22,7 +22,7 @@ def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:
     Args:
         erc_client: ERC3 client for API access
         task: Task to run
-        benchmark: Benchmark name ("store", "erc3")
+        benchmark: Benchmark name ("store", "erc3", "erc3-dev", "erc3-test")
     
     Returns:
         Result dict including trace of all events.
@@ -30,8 +30,8 @@ def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:
     if benchmark == "store":
         from benchmarks.store import run_store_benchmark
         return run_store_benchmark(erc_client, task)
-    elif benchmark == "erc3":
+    elif benchmark.startswith("erc3"):
         from benchmarks.erc3 import run_erc3_benchmark
         return run_erc3_benchmark(erc_client, task)
     else:
-        raise ValueError(f"Unknown benchmark: {benchmark}. Supported: 'store', 'erc3'")
+        raise ValueError(f"Unknown benchmark: {benchmark}. Supported: 'store', 'erc3*'")

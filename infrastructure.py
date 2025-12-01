@@ -5,13 +5,13 @@ Contains universal/benchmark-agnostic components:
 - OpenAI client initialization
 - LLM interface (get_next_step) - SINGLE place for all LLM calls
 - Trace helpers (next_node_id, calculate_depth, create_trace_event, create_validator_event)
-- SDK execution utilities (dispatch_with_timeout)
+- SDK execution utilities (dispatch_with_timeout, execute_sdk_call)
 - Conversation utilities (build_subagent_context, format_subagent_result, inject_plan)
 - Error definitions (AgentError, AgentTimeoutError, AgentStepLimitError)
 - TaskContext for LLM usage logging
 
 Import hierarchy: This module has NO internal imports.
-External imports only: langfuse, openai, config
+External imports only: langfuse, openai, config, erc3 (ApiException only)
 """
 
 import time
@@ -22,6 +22,7 @@ from langfuse.openai import OpenAI
 from langfuse import observe
 from openai.lib._parsing._completions import type_to_response_format_param
 from pydantic import BaseModel
+from erc3 import ApiException
 
 import config
 
@@ -356,6 +357,41 @@ def dispatch_with_timeout(benchmark_client, function, timeout_seconds: int = 30)
             return future.result(timeout=timeout_seconds)
         except concurrent.futures.TimeoutError:
             raise TimeoutError(f"SDK operation timed out after {timeout_seconds} seconds")
+
+
+def execute_sdk_call(function, benchmark_client) -> dict:
+    """
+    Execute a single SDK call with standard error handling.
+    
+    This is the base SDK execution function used by all benchmarks.
+    Handles dispatch, timeout, and ApiException errors uniformly.
+    
+    Args:
+        function: SDK request object (Pydantic model with model_dump/model_dump_json)
+        benchmark_client: SDK client for API calls
+    
+    Returns:
+        dict with:
+        - "text": JSON response string for conversation log
+        - "tool_call": {request, response} dict for trace
+    """
+    request_dict = function.model_dump()
+    
+    try:
+        result = dispatch_with_timeout(benchmark_client, function)
+        txt = result.model_dump_json(exclude_none=True, exclude_unset=True)
+        response_dict = result.model_dump(exclude_none=True, exclude_unset=True)
+    except TimeoutError as e:
+        txt = f'{{"error": "{str(e)}"}}'
+        response_dict = {"error": str(e)}
+    except ApiException as e:
+        txt = e.detail
+        response_dict = {"error": e.detail}
+    
+    return {
+        "text": txt,
+        "tool_call": {"request": request_dict, "response": response_dict}
+    }
 
 
 # ============================================================================
