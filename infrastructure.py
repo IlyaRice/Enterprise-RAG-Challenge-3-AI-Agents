@@ -3,9 +3,10 @@ Infrastructure module for agent execution.
 
 Contains universal/benchmark-agnostic components:
 - OpenAI client initialization
-- LLM interface (get_next_step) - SINGLE place for all LLM calls
+- LLM interface (call_llm) - SINGLE place for all LLM calls
 - Trace helpers (next_node_id, calculate_depth, create_trace_event, create_validator_event)
 - SDK execution utilities (dispatch_with_timeout, execute_sdk_call)
+- SDK dispatch wrappers (dispatch_with_retry, dispatch_once)
 - Conversation utilities (build_subagent_context, format_subagent_result, inject_plan)
 - Error definitions (AgentError, AgentTimeoutError, AgentStepLimitError)
 - TaskContext for LLM usage logging
@@ -78,13 +79,13 @@ class TaskContext:
 # Single place for LLM client setup. Easy to change provider/model globally.
 
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=config.OPENROUTER_API_KEY
+    base_url="https://api.cerebras.ai/v1",
+    api_key=config.CEREBRAS_API_KEY
 )
 
 # Model configuration - change here to affect all LLM calls
-LLM_MODEL = "openai/gpt-oss-120b"
-LLM_PROVIDER = {"only": ["Cerebras"]}
+LLM_MODEL = "gpt-oss-120b"
+LLM_MODEL_LOG_NAME = "openai/gpt-oss-120b"  # For SDK logs and traces
 
 
 # ============================================================================
@@ -256,24 +257,26 @@ def create_validator_event(
 # ============================================================================
 
 @observe()
-def get_next_step(
-    next_step_schema: BaseModel,
+def call_llm(
+    schema: BaseModel,
     system_prompt: str,
     conversation: List[dict],
     task_ctx: "TaskContext" = None,
+    reasoning_effort: str = "medium",
 ) -> dict:
     """
-    Get next step from LLM using the provided schema.
+    Call LLM with structured output.
     
     This is THE SINGLE PLACE where LLM is called for agent steps.
     Does NOT append to trace - returns data for caller to build trace event.
     Caller is responsible for creating the trace event with tool_calls attached.
     
     Args:
-        next_step_schema: Pydantic model for structured output
+        schema: Pydantic model for structured output
         system_prompt: System prompt (stored separately in trace)
         conversation: List of user/assistant messages (WITHOUT system prompt)
         task_ctx: TaskContext for logging LLM usage to ERC3 platform
+        reasoning_effort: Reasoning effort level ("low", "medium", "high")
     
     Returns:
         dict with:
@@ -287,7 +290,7 @@ def get_next_step(
     for msg in conversation:
         messages.append({"role": msg["role"], "content": msg["content"]})
             
-    schema = type_to_response_format_param(next_step_schema)
+    response_format = type_to_response_format_param(schema)
     
     # Retry logic for rare LLM failures
     for attempt in range(4):
@@ -295,17 +298,15 @@ def get_next_step(
             llm_start = time.time()
             
             lf = get_client()
-            with lf.start_as_current_generation(name="next-step-generation") as gen:
+            with lf.start_as_current_observation(name="llm-call") as gen:
                 response = client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=messages,
-                    response_format=schema,
-                    extra_body={
-                        "provider": LLM_PROVIDER,
-                    },
+                    response_format=response_format,
+                    reasoning_effort=reasoning_effort,
                 )
 
-                reasoning = response.choices[0].message.reasoning
+                reasoning = getattr(response.choices[0].message, 'reasoning', None)
                 gen.update(metadata={"reasoning": reasoning, "attempt": attempt + 1})
             
             llm_duration = time.time() - llm_start
@@ -315,7 +316,7 @@ def get_next_step(
                 task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
             
             content = response.choices[0].message.content
-            parsed = next_step_schema.model_validate_json(content)
+            parsed = schema.model_validate_json(content)
             
             return {
                 "parsed": parsed,
@@ -392,6 +393,58 @@ def execute_sdk_call(function, benchmark_client) -> dict:
         "text": txt,
         "tool_call": {"request": request_dict, "response": response_dict}
     }
+
+
+# ============================================================================
+# SDK DISPATCH WRAPPERS
+# ============================================================================
+# Wrappers for SDK dispatch with different retry behaviors.
+# Use dispatch_with_retry for read operations, dispatch_once for writes.
+
+def dispatch_with_retry(client, request, max_retries: int = 2, delay: float = 0.1):
+    """
+    Execute SDK dispatch with retry on transient failures.
+    
+    For READ operations (list, get, search) where retrying is safe.
+    
+    Args:
+        client: SDK client
+        request: SDK request object to dispatch
+        max_retries: Maximum retry attempts (default 2, so up to 3 total attempts)
+        delay: Delay in seconds between retries (default 0.1s)
+    
+    Returns:
+        SDK response object
+    
+    Raises:
+        Last exception if all retries fail
+    """
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return client.dispatch(request)
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                time.sleep(delay)
+    raise last_error
+
+
+def dispatch_once(client, request):
+    """
+    Execute SDK dispatch without retry.
+    
+    For WRITE operations (update, log, delete) where retrying could cause duplicates.
+    Thin wrapper for API consistency and explicit intent.
+    
+    Args:
+        client: SDK client
+        request: SDK request object to dispatch
+    
+    Returns:
+        SDK response object
+    """
+    return client.dispatch(request)
 
 
 # ============================================================================

@@ -13,13 +13,11 @@ Import hierarchy: This module imports from infrastructure.py and benchmarks.stor
 import time
 from typing import List, Callable
 from langfuse import observe
-from openai.lib._parsing._completions import type_to_response_format_param
 
 import config
 from infrastructure import (
     # LLM
-    client, LLM_MODEL, LLM_PROVIDER,
-    get_next_step,
+    call_llm,
     # Trace helpers
     next_node_id, create_trace_event, create_validator_event,
     # Conversation utilities
@@ -124,27 +122,16 @@ Validate this plan. Is it sound, or are there issues?"""
     llm_start = time.time()
     
     try:
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            response_format=schema,
-            extra_body={
-                "provider": LLM_PROVIDER,
-            },
+        llm_result = call_llm(
+            schema=StepValidatorResponse,
+            system_prompt=system_prompt,
+            conversation=[{"role": "user", "content": user_message}],
+            task_ctx=task_ctx,
         )
         
-        llm_duration = time.time() - llm_start
-        
-        # Log LLM usage to ERC3 platform
-        if task_ctx:
-            task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
-        
-        content = response.choices[0].message.content
-        parsed = StepValidatorResponse.model_validate_json(content)
-        reasoning = getattr(response.choices[0].message, 'reasoning', None)
+        parsed = llm_result["parsed"]
+        reasoning = llm_result["reasoning"]
+        llm_duration = llm_result["timing"]
         
         # Log as validator_step event
         trace.append(create_validator_event(
@@ -221,10 +208,10 @@ def validate_and_retry_step(
     
     Args:
         agent_config: Agent configuration from registry
-        schema: Agent's output schema for get_next_step
+        schema: Agent's output schema for call_llm
         system_prompt: Agent's system prompt
         conversation: Current conversation (will NOT be modified)
-        llm_result: Initial LLM result from get_next_step
+        llm_result: Initial LLM result from call_llm
         original_task: Original task for context
         parent_node_id: Parent node ID for trace
         step_count: Current step count (for node_id generation)
@@ -352,7 +339,7 @@ def validate_and_retry_step(
             })
             
             # Get new plan from agent
-            current_llm_result = get_next_step(schema, system_prompt, temp_conversation, task_ctx=task_ctx)
+            current_llm_result = call_llm(schema, system_prompt, temp_conversation, task_ctx=task_ctx)
     
     # All attempts exhausted and rejected - force approve the last one
     # (Already logged in the loop above)
@@ -411,32 +398,19 @@ PRODUCT CATALOG:
 Analyze the products above and answer the task."""
     
     # Step 4: Single LLM call with simple schema
-    schema = type_to_response_format_param(ProductExplorerResponse)
-    
     llm_start = time.time()
     
     try:
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt_product_explorer},
-                {"role": "user", "content": user_message},
-            ],
-            response_format=schema,
-            extra_body={
-                "provider": LLM_PROVIDER,
-            },
+        llm_result = call_llm(
+            schema=ProductExplorerResponse,
+            system_prompt=system_prompt_product_explorer,
+            conversation=[{"role": "user", "content": user_message}],
+            task_ctx=task_ctx,
         )
         
-        llm_duration = time.time() - llm_start
-        
-        # Log LLM usage to ERC3 platform
-        if task_ctx:
-            task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
-        
-        content = response.choices[0].message.content
-        parsed = ProductExplorerResponse.model_validate_json(content)
-        reasoning = getattr(response.choices[0].message, 'reasoning', None)
+        parsed = llm_result["parsed"]
+        reasoning = llm_result["reasoning"]
+        llm_duration = llm_result["timing"]
         
         # Step 5: Log to trace
         trace.append(create_trace_event(
@@ -571,7 +545,7 @@ def run_agent_loop(
     THE unified agent loop that works for both orchestrator and subagents.
     
     This is the core execution engine. It handles:
-    - LLM calls via get_next_step()
+    - LLM calls via call_llm()
     - Pre-execution validation via StepValidator
     - Tool execution (SDK or meta-tool dispatch)
     - Conversation management
@@ -624,7 +598,7 @@ def run_agent_loop(
     # Main loop
     for i in range(max_steps):
         # Get LLM decision
-        llm_result = get_next_step(schema, system_prompt, conversation, task_ctx=task_ctx)
+        llm_result = call_llm(schema, system_prompt, conversation, task_ctx=task_ctx)
         
         # Pre-execution validation (StepValidator)
         # May produce new llm_result if rejected and retried

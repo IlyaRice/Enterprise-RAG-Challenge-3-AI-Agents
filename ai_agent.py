@@ -10,7 +10,7 @@ Contains:
 
 from langfuse import observe
 from erc3 import TaskInfo, ERC3
-
+import config
 
 @observe()
 def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:

@@ -1,3 +1,0 @@
-# This file keeps the wiki_data folder in git while the contents are gitignored.
-# Wiki data is downloaded via: from benchmarks.erc3.wiki import ingest_wikis
-

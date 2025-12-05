@@ -2,15 +2,17 @@
 Wiki ingestion and preprocessing for ERC3 benchmarks.
 
 Downloads and caches wiki files for erc3, erc3-dev, and erc3-test benchmarks.
-Wikis are stored in wiki_data/{benchmark_name}/{sha1_prefix}/.
+Wikis are stored in wiki_data/{sha1_prefix}/ - shared across benchmarks since
+wikis with the same SHA are identical regardless of which benchmark uses them.
 
 Also provides benchmark metadata export for development reference.
 
 Usage:
-    from benchmarks.erc3.wiki import ingest_wikis, export_specs_info
+    from benchmarks.erc3.wiki import ingest_wikis, tag_wiki_files, export_specs_info
     
-    ingest_wikis("erc3-dev")      # Download erc3-dev wikis
-    export_specs_info("erc3-dev") # Export specs to docs/erc3/
+    ingest_wikis("erc3-dev")       # Download erc3-dev wikis
+    tag_wiki_files(wiki_dir)       # Tag files with has_rules
+    export_specs_info("erc3-dev")  # Export specs to docs/erc3/
 """
 
 import json
@@ -20,7 +22,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import config
 from erc3 import ERC3, TaskInfo
 from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI
-
+from langfuse import observe
+from infrastructure import call_llm
+from .prompts import TaggingResponse, ValidatorResponse, tagging_prompt, validator_prompt
+import config
 
 # Path to wiki data directory (relative to this file)
 WIKI_DATA_DIR = Path(__file__).parent / "wiki_data"
@@ -29,32 +34,30 @@ WIKI_DATA_DIR = Path(__file__).parent / "wiki_data"
 DOCS_DIR = Path(__file__).parent.parent.parent / "docs" / "erc3"
 
 
-def get_wiki_data_path(benchmark_name: str, sha1_prefix: str = None) -> Path:
+def get_wiki_data_path(sha1_prefix: str = None) -> Path:
     """
     Get path to wiki data directory.
     
     Args:
-        benchmark_name: Benchmark name (e.g., "erc3-dev")
         sha1_prefix: Optional 8-char sha1 prefix for specific wiki version
     
     Returns:
         Path to wiki data directory or specific wiki version folder
     """
-    path = WIKI_DATA_DIR / benchmark_name
     if sha1_prefix:
-        path = path / sha1_prefix
-    return path
+        return WIKI_DATA_DIR / sha1_prefix
+    return WIKI_DATA_DIR
 
 
-def _download_wiki_files(client, wiki_dir: Path, benchmark_name: str, wiki_sha1: str, tasks: list):
+def _download_wiki_files(client, wiki_dir: Path, wiki_sha1: str, benchmark_name: str, tasks: list):
     """
     Download all wiki files and create manifest.
     
     Args:
         client: SDK client for API calls
         wiki_dir: Directory to save wiki files
-        benchmark_name: Name of the benchmark
         wiki_sha1: Full SHA1 hash of the wiki
+        benchmark_name: Name of the benchmark
         tasks: List of task dicts with index, id, task, gotcha
     """
     list_response = client.dispatch(Req_ListWiki())
@@ -64,8 +67,9 @@ def _download_wiki_files(client, wiki_dir: Path, benchmark_name: str, wiki_sha1:
     
     manifest = {
         "sha1": wiki_sha1,
-        "benchmark": benchmark_name,
-        "tasks": tasks,
+        "tasks": {
+            benchmark_name: tasks
+        },
         "files": []
     }
     
@@ -96,11 +100,6 @@ def _download_wiki_files(client, wiki_dir: Path, benchmark_name: str, wiki_sha1:
     
     (wiki_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"  ✓ Wiki exported to {wiki_dir}")
-
-
-def _get_client(core: ERC3, task_info: TaskInfo):
-    """Get the appropriate SDK client for erc3 benchmarks."""
-    return core.get_erc_dev_client(task_info)
 
 
 def ingest_wikis(benchmark_name: str):
@@ -142,7 +141,7 @@ def ingest_wikis(benchmark_name: str):
             score=0.0
         )
         
-        client = _get_client(core, task_info)
+        client = core.get_erc_dev_client(task_info)
         task_cache[spec_idx] = (client, task_info)
         return client, task_info
     
@@ -191,32 +190,48 @@ def ingest_wikis(benchmark_name: str):
     
     print(f"\nFound {len(sha1_to_data)} unique wiki versions")
     
-    # Step 2: Download wikis for unique sha1 hashes
-    print("\nStep 2: Downloading unique wikis...")
+    # Step 2: Download wikis or update existing manifests
+    print("\nStep 2: Processing wikis...")
     downloaded_count = 0
+    updated_count = 0
     
     for wiki_sha1, data in sha1_to_data.items():
         hash_prefix = data["hash_prefix"]
         tasks = sorted(data["tasks"], key=lambda t: t["index"])  # Sort by index
         client = data["client"]
         
-        wiki_dir = get_wiki_data_path(benchmark_name, hash_prefix)
+        wiki_dir = get_wiki_data_path(hash_prefix)
+        manifest_path = wiki_dir / "manifest.json"
         
-        # Check if already downloaded
-        if (wiki_dir / "manifest.json").exists():
-            print(f"  {hash_prefix}: Already exists ({len(tasks)} tasks use it), skipping...")
+        # Check if wiki already exists
+        if manifest_path.exists():
+            # Load existing manifest and check if this benchmark is already there
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            existing_tasks = manifest.get("tasks", {})
+            
+            if benchmark_name in existing_tasks:
+                print(f"  {hash_prefix}: Already has {benchmark_name} tasks, skipping...")
+                continue
+            
+            # Add tasks for this benchmark
+            existing_tasks[benchmark_name] = tasks
+            manifest["tasks"] = existing_tasks
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            print(f"  {hash_prefix}: Added {len(tasks)} tasks for {benchmark_name}")
+            updated_count += 1
             continue
         
-        print(f"  {hash_prefix}: Downloading ({len(tasks)} tasks use it)...")
+        # Download new wiki
+        print(f"  {hash_prefix}: Downloading ({len(tasks)} tasks in {benchmark_name})...")
         
         try:
             wiki_dir.mkdir(parents=True, exist_ok=True)
-            _download_wiki_files(client, wiki_dir, benchmark_name, wiki_sha1, tasks)
+            _download_wiki_files(client, wiki_dir, wiki_sha1, benchmark_name, tasks)
             downloaded_count += 1
         except Exception as e:
             print(f"  ✗ Error downloading wiki {hash_prefix}: {str(e)}")
     
-    print(f"\n✓ Completed! Downloaded {downloaded_count} new wikis, {len(sha1_to_data) - downloaded_count} already existed")
+    print(f"\n✓ Completed! Downloaded {downloaded_count} new, updated {updated_count} existing")
 
 
 def export_specs_info(benchmark_name: str) -> Path:
@@ -283,4 +298,117 @@ def export_specs_info(benchmark_name: str) -> Path:
     
     print(f"✓ Specs exported to {output_path}")
     return output_path
+
+
+# ============================================================================
+# FILE TAGGING
+# ============================================================================
+
+@observe()
+def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
+    """
+    Tag wiki files with has_rules flag using LLM.
+    
+    Args:
+        wiki_dir: Path to wiki directory containing manifest.json
+        max_attempts: Max validation retry attempts
+    
+    Returns:
+        Dict with counts: {"tagged": N, "with_rules": M}
+    """
+    wiki_path = Path(wiki_dir)
+    manifest_path = wiki_path / "manifest.json"
+    
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"No manifest.json in {wiki_dir}")
+    
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    files = manifest.get("files", [])
+    
+    if not files:
+        return {"tagged": 0, "with_rules": 0}
+    
+    # Load all file contents
+    file_contents = []
+    for f in files:
+        file_path = wiki_path / f["saved_as"]
+        if file_path.exists():
+            content = file_path.read_text(encoding="utf-8")
+            file_contents.append(f'<file name="{f["saved_as"]}">\n{content}\n</file>')
+    
+    all_content = "\n\n".join(file_contents)
+    original_user_message = f"Review these wiki files and identify which contain rules:\n\n{all_content}"
+    current_user_message = original_user_message
+    
+    last_result = []
+    
+    for attempt in range(1, max_attempts + 1):
+        print(f"  Attempt {attempt}/{max_attempts}...")
+        
+        # Tag
+        t_result = call_llm(
+            schema=TaggingResponse,
+            system_prompt=tagging_prompt,
+            conversation=[{"role": "user", "content": current_user_message}],
+            reasoning_effort="high",
+        )
+        t_parsed = t_result["parsed"]
+        last_result = t_parsed.files_with_rules
+        
+        print(f"    Found {len(last_result)} files with rules: {last_result}")
+        
+        # Validate
+        formatted_output = f"Files with rules: {last_result}"
+        validator_message = f"""TASK:
+<system_prompt>
+{tagging_prompt}
+</system_prompt>
+
+<user_prompt>
+{original_user_message}
+</user_prompt>
+
+<result>
+{formatted_output}
+</result>
+
+Very carefully assess whether this result correctly fulfills the task. Check for both:
+1. False negatives: files that contain rules but were not listed
+2. False positives: files that were listed but don't actually contain rules"""
+
+        v_result = call_llm(
+            schema=ValidatorResponse,
+            system_prompt=validator_prompt,
+            conversation=[{"role": "user", "content": validator_message}],
+            reasoning_effort="high",
+        )
+        v_parsed = v_result["parsed"]
+        print(f"    Validator: {'PASS' if v_parsed.is_valid else 'REJECT'}")
+        
+        if v_parsed.is_valid:
+            break
+        
+        if attempt < max_attempts:
+            print(f"    Rejection: {v_parsed.rejection_message}...")
+            current_user_message = f"""{original_user_message}
+
+RETRY: Previous attempt was rejected.
+
+Previous output: {last_result}
+
+Rejection feedback: {v_parsed.rejection_message}
+
+Address this feedback and try again."""
+    
+    # Update manifest
+    files_with_rules_set = set(last_result)
+    for f in files:
+        f["has_rules"] = f["saved_as"] in files_with_rules_set
+    
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    
+    return {
+        "tagged": len(files),
+        "with_rules": len(files_with_rules_set),
+    }
 

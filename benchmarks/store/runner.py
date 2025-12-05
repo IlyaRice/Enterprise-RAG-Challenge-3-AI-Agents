@@ -17,7 +17,7 @@ from erc3 import TaskInfo, ERC3
 from infrastructure import (
     AgentStepLimitError,
     TaskContext,
-    LLM_MODEL,
+    LLM_MODEL_LOG_NAME,
 )
 
 # Import from universal agent execution
@@ -115,7 +115,7 @@ def run_store_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     trace = []
     
     # Create TaskContext for LLM usage logging
-    task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL)
+    task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME)
     
     if config.VERBOSE:
         print(f"\nTask: {task.task_text}\n")

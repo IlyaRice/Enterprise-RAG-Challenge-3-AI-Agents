@@ -24,7 +24,7 @@ from erc3 import ERC3, TaskInfo
 from langfuse import observe, get_client
 
 from ai_agent import run_agent
-
+import config
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -138,18 +138,29 @@ def _repeat_task(benchmark: str, task_index: int, num_times: int) -> List[dict]:
 
 
 def _save_results(result: "RunResult", export_path: str, prefix: str):
-    """Save RunResult to JSON file."""
-    # Convert ISO timestamp to filename-safe format
+    """Save RunResult to JSON files (full + summary)."""
     timestamp = result.meta.started_at.replace(":", "-").replace(".", "-")
     filename = f"{prefix}_{timestamp}.json"
-    filepath = os.path.join(export_path, filename)
     
+    # Save full trace
     os.makedirs(export_path, exist_ok=True)
-    
-    with open(filepath, "w", encoding="utf-8") as f:
+    filepath_full = os.path.join(export_path, filename)
+    with open(filepath_full, "w", encoding="utf-8") as f:
         json.dump(result.model_dump(), f, ensure_ascii=False, indent=2)
     
-    print(f"Results saved to: {filepath}")
+    # Save summary (without trace fields)
+    summary_dir = os.path.join(export_path, "summary")
+    os.makedirs(summary_dir, exist_ok=True)
+    filepath_summary = os.path.join(summary_dir, filename)
+    
+    result_dict = result.model_dump()
+    result_dict["results"] = [{k: v for k, v in r.items() if k != "trace"} for r in result_dict["results"]]
+    
+    with open(filepath_summary, "w", encoding="utf-8") as f:
+        json.dump(result_dict, f, ensure_ascii=False, indent=2)
+    
+    print(f"Results saved to: {filepath_full}")
+    print(f"Summary saved to: {filepath_summary}")
 
 
 def _visualize_task_scores(results: List[TaskResult], num_runs: int):
