@@ -15,7 +15,8 @@ from erc3.erc3.dtos import Req_ProvideAgentResponse
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
 from .agent_config import AGENT_REGISTRY
-from .agent_execution import run_context_builder, run_erc3_agent_loop
+from .context_rules import run_context_builder
+from .loop import run_erc3_agent_loop
 from .rules import load_rules_for_session
 from .tools import (
     collect_context_blocks,

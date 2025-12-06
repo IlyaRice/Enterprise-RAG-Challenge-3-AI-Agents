@@ -21,7 +21,7 @@ from infrastructure import (
 )
 
 # Import from universal agent execution
-from agent_execution import run_agent_loop
+from .store_agent_loop import run_agent_loop
 
 # Import from store-specific modules
 from .agent_config import AGENT_REGISTRY

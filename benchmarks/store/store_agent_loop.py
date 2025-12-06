@@ -1,13 +1,9 @@
 """
-Agent execution module.
+Store benchmark agent execution loop.
 
-Contains:
-- run_agent_loop() - THE unified loop for all agents
-- validate_and_retry_step() - Pre-execution validation with retry
-- execute_meta_tool() - spawns child agent (recursive)
-- run_step_validator() - pre-execution plan validation (StepValidator)
-
-Import hierarchy: This module imports from infrastructure.py and benchmarks.store
+This module contains THE unified loop for store agents (orchestrator + subagents),
+including pre-execution validation, meta-tool delegation, SDK tool execution,
+and trace logging.
 """
 
 import time
@@ -109,7 +105,7 @@ Agent's system prompt (defines agent capabilities):
 {agent_system_prompt}
 
 Conversation history (what agent has seen):
-{chr(10).join(conversation_summary)}
+{"\n".join(conversation_summary)}
 
 Agent's planned next step:
 - Current state: {agent_output.get('current_state', 'N/A')}
@@ -150,7 +146,7 @@ Validate this plan. Is it sound, or are there issues?"""
         
         if config.VERBOSE:
             if not parsed.is_valid:
-                print(f"    ⚠ {validator_name} rejected ({llm_duration:.2f}s): {parsed.rejection_message[:60]}...")
+                print(f"    ✗ {validator_name} rejected ({llm_duration:.2f}s): {parsed.rejection_message}")
             else:
                 print(f"    ✓ {validator_name} approved ({llm_duration:.2f}s)")
         
@@ -177,7 +173,7 @@ Validate this plan. Is it sound, or are there issues?"""
         ))
         
         if config.VERBOSE:
-            print(f"    ⚠ {validator_name} error: {e}")
+            print(f"    ў?я {validator_name} error: {e}")
         return {
             "is_valid": True,
             "rejection_message": "",
@@ -478,7 +474,7 @@ def execute_meta_tool(
     Args:
         meta_tool_instance: Instance of ProductExplorer, BasketBuilder, etc.
         orchestrator_log: Orchestrator's full conversation (for context building)
-        benchmark_client: SDK client for sub-agent to use
+        benchmark_client: SDK client for API calls
         trace: Trace list to append events to
         parent_node_id: Orchestrator's node ID (e.g., "2")
         tool_executor: Function to execute SDK tools (passed to subagent loop)
