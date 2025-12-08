@@ -8,13 +8,23 @@ Defines:
 - Helper utilities for agent/tool lookup
 """
 
-from erc3.erc3.dtos import Req_ProvideAgentResponse
+from erc3.erc3.dtos import (
+    Req_ProvideAgentResponse,
+    Req_GetCustomer, Req_GetEmployee, Req_GetProject, Req_GetTimeEntry,
+    Req_LoadWiki, Req_SearchWiki, Req_UpdateEmployeeInfo, Req_UpdateProjectStatus,
+    Req_UpdateProjectTeam, Req_UpdateTimeEntry, Req_UpdateWiki,
+    Req_TimeSummaryByEmployee, Req_TimeSummaryByProject,
+)
 
 from .prompts import (
     NextStepERC3Orchestrator,
     ERC3StepValidatorResponse,
+    ERC3RespondValidatorResponse,
     system_prompt_erc3_orchestrator,
     system_prompt_erc3_step_validator,
+    system_prompt_erc3_respond_validator,
+    Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
+    Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
 )
 
 # No meta-tools for ERC3 (single-agent architecture)
@@ -34,15 +44,33 @@ AGENT_REGISTRY = {
     },
 }
 
+# Non-respond tools (all tools except Req_ProvideAgentResponse)
+NON_RESPOND_TOOLS = (
+    Req_ListEmployees, Req_SearchEmployees, Req_GetEmployee, Req_UpdateEmployeeInfo,
+    Req_ListCustomers, Req_SearchCustomers, Req_GetCustomer,
+    Req_ListProjects, Req_SearchProjects, Req_GetProject, Req_UpdateProjectTeam, Req_UpdateProjectStatus,
+    Req_LoadWiki, Req_SearchWiki, Req_UpdateWiki,
+    Req_LogTimeEntry, Req_UpdateTimeEntry, Req_GetTimeEntry, Req_SearchTimeEntries,
+    Req_TimeSummaryByProject, Req_TimeSummaryByEmployee,
+)
+
 # Step validator registry (pre-execution planning guardrail)
 VALIDATOR_REGISTRY = {
+    "respond_validator": {
+        "name": "ERC3RespondValidator",
+        "system_prompt": system_prompt_erc3_respond_validator,
+        "schema": ERC3RespondValidatorResponse,
+        "triggers_on_tools": (Req_ProvideAgentResponse,),
+        "applies_to_agents": ("ERC3Orchestrator",),
+        "max_attempts": 2,
+    },
     "step_validator": {
         "name": "ERC3StepValidator",
         "system_prompt": system_prompt_erc3_step_validator,
         "schema": ERC3StepValidatorResponse,
-        "triggers_on_tools": "*",
+        "triggers_on_tools": NON_RESPOND_TOOLS,
         "applies_to_agents": ("ERC3Orchestrator",),
-        "max_attempts": 1,
+        "max_attempts": 2,
     },
 }
 

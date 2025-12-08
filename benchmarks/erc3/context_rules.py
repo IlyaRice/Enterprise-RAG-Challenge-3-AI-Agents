@@ -35,15 +35,15 @@ def _get_rule_files(wiki_dir: str) -> List[dict]:
     Returns:
         List of dicts with 'path' (database format) and 'saved_as' (local filename)
     """
-    manifest_path = Path(wiki_dir) / "manifest.json"
+    wiki_meta_path = Path(wiki_dir) / "wiki_meta.json"
     
-    if not manifest_path.exists():
+    if not wiki_meta_path.exists():
         return []
     
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
     
     rule_files = []
-    for file_info in manifest.get("files", []):
+    for file_info in wiki_meta.get("files", []):
         if file_info.get("has_rules", False):
             rule_files.append({
                 "path": file_info["path"],
@@ -97,7 +97,7 @@ def _format_rule_block(wiki_path: str, content: str) -> str:
     """Format extracted rules as a wiki block."""
     if not content.strip():
         return ""
-    return f"<wiki:{wiki_path}>\n{content}\n</wiki:{wiki_path}>"
+    return f"<kind=wiki id={wiki_path}>\n{content}\n</kind=wiki id={wiki_path}>"
 
 
 @observe()
@@ -163,7 +163,7 @@ def run_context_builder(
         
     except Exception as e:
         # On error, return all blocks (fail-safe)
-        print(f"¢?ÿ Context builder error: {e}, returning all blocks")
+        print(f"✗ Context builder error: {e}, returning all blocks")
         return list(collected.blocks.keys())
 
 
@@ -204,7 +204,7 @@ def _process_single_rule_file(
     try:
         raw_content = file_path.read_text(encoding="utf-8")
     except Exception as e:
-        print(f"¢?ÿ Rule builder: failed to read {local_filename}: {e}")
+        print(f"✗ Rule builder: failed to read {local_filename}: {e}")
         return ""
     
     # Add line numbers for LLM
@@ -252,7 +252,7 @@ def _process_single_rule_file(
         
     except Exception as e:
         # Fallback: return entire file content
-        print(f"¢?ÿ Rule builder error for {wiki_path}: {e}, using full file as fallback")
+        print(f"✗ Rule builder error for {wiki_path}: {e}, using full file as fallback")
         return _format_rule_block(wiki_path, raw_content)
 
 
@@ -317,7 +317,7 @@ def run_rule_builder(
         task_text: User's task
         session_content: Formatted session context (from format_whoami)
         employee_content: Formatted employee context (from format_employee), or None
-        wiki_dir: Path to wiki directory containing manifest.json
+        wiki_dir: Path to wiki directory containing wiki_meta.json
         task_ctx: TaskContext for logging LLM usage
     
     Returns:

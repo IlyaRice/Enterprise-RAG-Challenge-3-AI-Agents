@@ -58,18 +58,21 @@ class TaskContext:
     
     Passed through the call chain to enable log_llm calls at each LLM invocation.
     """
-    def __init__(self, erc_client, task_id: str, model: str):
+    def __init__(self, erc_client, task_id: str, model: str, whoami: dict = None):
         self.erc_client = erc_client
         self.task_id = task_id
         self.model = model
+        self.whoami = whoami or {}
     
-    def log_llm(self, duration_sec: float, usage):
+    def log_llm(self, completion: str, duration_sec: float, usage):
         """Log LLM usage to ERC3 platform."""
         self.erc_client.log_llm(
             task_id=self.task_id,
             model=self.model,
+            completion=completion,
             duration_sec=duration_sec,
-            usage=usage
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens
         )
 
 
@@ -310,12 +313,11 @@ def call_llm(
                 gen.update(metadata={"reasoning": reasoning, "attempt": attempt + 1})
             
             llm_duration = time.time() - llm_start
+            content = response.choices[0].message.content
             
             # Log LLM usage to ERC3 platform
             if task_ctx:
-                task_ctx.log_llm(duration_sec=llm_duration, usage=response.usage)
-            
-            content = response.choices[0].message.content
+                task_ctx.log_llm(completion=content, duration_sec=llm_duration, usage=response.usage)
             parsed = schema.model_validate_json(content)
             
             return {

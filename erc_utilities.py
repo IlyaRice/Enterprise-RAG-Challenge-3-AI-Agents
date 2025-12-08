@@ -258,6 +258,9 @@ def repeat_tasks(
     num_scored = sum(1 for r in task_results if r.score is not None)
     avg_score = total_score / num_scored if num_scored > 0 else 0.0
     
+    max_score = num_times * len(task_indices)
+    print(f"{'='*50}\nTOTAL SCORE: {total_score}/{max_score}\n{'='*50}")
+    
     meta = RunMeta(
         benchmark=benchmark,
         task_indices=sorted(task_indices),
@@ -401,7 +404,8 @@ def create_and_run_session(
         benchmark=benchmark,
         workspace=workspace,
         name=name,
-        architecture=architecture
+        architecture=architecture,
+        flags=["compete_accuracy", "compete_budget", "compete_speed", "compete_local"]
     )
     print(f"Created session {session.session_id} with {session.task_count} tasks")
     return _run_session(benchmark, session.session_id, workspace, name, architecture, export_path)

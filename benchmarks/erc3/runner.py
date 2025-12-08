@@ -4,6 +4,8 @@ ERC3 benchmark runner.
 Coordinates context gathering, orchestrator execution, and evaluation.
 """
 
+import json
+from pathlib import Path
 from typing import List
 
 from langfuse import get_client, observe
@@ -48,9 +50,22 @@ def _build_full_erc3_context(
 
 def _complete_and_format_result(task: TaskInfo, erc_client: ERC3, trace: List[dict], agent_result: dict, benchmark: str) -> dict:
     """Submit task completion and format the final payload."""
-    completion = erc_client.complete_task(task)
-    score = completion.eval.score if completion.eval else None
-    eval_logs = completion.eval.logs if completion.eval else None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            completion = erc_client.complete_task(task)
+            score = completion.eval.score if completion.eval else None
+            eval_logs = completion.eval.logs if completion.eval else None
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"WARNING: Task completion failed for task {task.task_id} (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                continue
+            else:
+                # If completion/evaluation fails after all retries, return result without score
+                print(f"ERROR: Task completion failed for task {task.task_id} after {max_retries} attempts: {str(e)}")
+                score = 0
+                eval_logs = f"Completion failed after {max_retries} attempts: {str(e)}"
     
     lf = get_client()
     lf.score_current_span(name="score", value=score, data_type="NUMERIC", comment=eval_logs)
@@ -107,7 +122,6 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     """
     benchmark_client = erc_client.get_erc_dev_client(task)
     trace: List[dict] = []
-    task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME)
     
     if config.VERBOSE:
         print(f"\nTask: {task.task_text}\n")
@@ -117,13 +131,23 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     
     # Context gathering pipeline
     whoami = whoami_raw(benchmark_client)
+    task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME, whoami=whoami)
     collected = collect_context_blocks(benchmark_client, task)
     selected_blocks = run_context_builder(task.task_text, collected, task_ctx)
     base_context = build_orchestrator_context(collected, selected_blocks)
     rules = load_rules_for_session(whoami)
     
-    # Build system prompt with rules appended
-    system_prompt = orchestrator_config["system_prompt"]
+    # Load company info and format system prompt
+    wiki_sha1 = whoami.get("wiki_sha1", "")[:8]
+    wiki_meta_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "wiki_meta.json"
+    wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
+    
+    system_prompt = orchestrator_config["system_prompt"].format(
+        company_name=wiki_meta.get("company_name", "ERC3"),
+        company_locations=", ".join(wiki_meta.get("company_locations", [])),
+        company_execs=", ".join(wiki_meta.get("company_execs", []))
+    )
+    
     if rules and rules.strip():
         system_prompt = f"{system_prompt}\n\n<rules>\n{rules}\n</rules>"
     orchestrator_config["system_prompt"] = system_prompt

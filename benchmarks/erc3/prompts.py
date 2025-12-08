@@ -13,22 +13,18 @@ from typing import List, Literal, Union
 from pydantic import BaseModel, Field
 
 from erc3.erc3.dtos import (
+    BillableFilter,
     CompanyID,
+    DealPhase,
     EmployeeID,
     ProjectID,
+    ProjectTeamFilter,
     Req_GetCustomer,
     Req_GetEmployee,
     Req_GetProject,
     Req_GetTimeEntry,
-    Req_ListCustomers,
-    Req_ListEmployees,
-    Req_ListProjects,
     Req_LoadWiki,
     Req_ProvideAgentResponse,
-    Req_SearchCustomers,
-    Req_SearchEmployees,
-    Req_SearchProjects,
-    Req_SearchTimeEntries,
     Req_SearchWiki,
     Req_TimeSummaryByEmployee,
     Req_TimeSummaryByProject,
@@ -37,6 +33,7 @@ from erc3.erc3.dtos import (
     Req_UpdateProjectTeam,
     Req_UpdateTimeEntry,
     Req_UpdateWiki,
+    SkillFilter,
     TimeEntryStatus,
 )
 from erc3.erc3.dtos import Req_LogTimeEntry as Req_LogTimeEntry_Vendor
@@ -63,14 +60,77 @@ class Req_LogTimeEntry(BaseModel):
 
 
 # ============================================================================
+# AUTOPAGINATED WRAPPERS
+# ============================================================================
+# Simplified wrappers without limit/offset - autopaginated by execute layer.
+
+class Req_ListEmployees(BaseModel):
+    """List all employees (autopaginated)."""
+    tool: Literal["/employees/list"] = "/employees/list"
+
+
+class Req_SearchEmployees(BaseModel):
+    """Search employees with filters (autopaginated)."""
+    tool: Literal["/employees/search"] = "/employees/search"
+    query: str | None = None
+    location: str | None = None
+    department: str | None = None
+    manager: str | None = None
+    skills: List[SkillFilter] = Field(default_factory=list)
+    wills: List[SkillFilter] = Field(default_factory=list)
+
+
+class Req_ListCustomers(BaseModel):
+    """List all customers (autopaginated)."""
+    tool: Literal["/customers/list"] = "/customers/list"
+
+
+class Req_SearchCustomers(BaseModel):
+    """Search customers with filters (autopaginated)."""
+    tool: Literal["/customers/search"] = "/customers/search"
+    query: str | None = None
+    deal_phase: List[DealPhase] = Field(default_factory=list)
+    account_managers: List[EmployeeID] = Field(default_factory=list)
+    locations: List[str] = Field(default_factory=list)
+
+
+class Req_ListProjects(BaseModel):
+    """List all projects (autopaginated)."""
+    tool: Literal["/projects/list"] = "/projects/list"
+
+
+class Req_SearchProjects(BaseModel):
+    """Search projects with filters (autopaginated)."""
+    tool: Literal["/projects/search"] = "/projects/search"
+    query: str | None = None
+    customer_id: CompanyID | None = None
+    status: List[DealPhase] = Field(default_factory=list)
+    team: ProjectTeamFilter | None = None
+    include_archived: bool = False
+
+
+class Req_SearchTimeEntries(BaseModel):
+    """Search time entries with filters (autopaginated)."""
+    tool: Literal["/time/search"] = "/time/search"
+    employee: EmployeeID | None = None
+    customer: CompanyID | None = None
+    project: ProjectID | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    work_category: str | None = None
+    billable: BillableFilter = ""
+    status: TimeEntryStatus = ""
+
+
+# ============================================================================
 # CONTEXT BUILDER
 # ============================================================================
 # Selects relevant context blocks for the task.
 
 class ContextSelection(BaseModel):
     """Context builder's selection of relevant blocks."""
-    reasoning: str = Field(..., description="Why these blocks are relevant to the task")
-    selected_blocks: List[str] = Field(..., description="List of block names to include in context")
+    reasoning: str = Field(..., description="2-4 sentences explaining relevance. Cite specific task requirements.")
+    selected_blocks: List[str] = Field(..., description="Block names to include. When uncertain, include rather than exclude.")
 
 
 system_prompt_context_builder = """
@@ -129,7 +189,7 @@ class RuleChunk(BaseModel):
 
 class RuleSelection(BaseModel):
     """Rule builder's selection of relevant chunks from a single file."""
-    reasoning: str = Field(..., description="Why these chunks are relevant to the task")
+    reasoning: str = Field(..., description="2-4 sentences explaining relevance. Cite specific task requirements.")
     chunks: List[RuleChunk] = Field(default_factory=list, description="List of line ranges to include")
 
 
@@ -173,7 +233,7 @@ Return line ranges as (start_line, end_line) pairs.
 - Each chunk should be a contiguous block of relevant content
 - Multiple chunks are fine - they will be merged if adjacent
 
-If NO rules are relevant to this specific task, return an empty chunks list.
+Return empty chunks list ONLY if clearly certain no rules apply.
 </output_format>
 """
 
@@ -199,6 +259,58 @@ class ValidatorResponse(BaseModel):
     analysis: str = Field(..., description="Brief analysis of the work")
     is_valid: bool = Field(..., description="Pass or fail")
     rejection_message: str = Field(default="", description="What's wrong + what to fix")
+
+
+class ResponseRuleExtraction(BaseModel):
+    """Categorized rule extraction for /respond tool behavior."""
+    outcome_rules: str = Field(..., description="Rules for when to use each outcome type")
+    link_rules: str = Field(..., description="Rules for each link kind")
+    message_formatting: str = Field(..., description="Message content rules")
+    general_constraints: str = Field(..., description="Cross-cutting rules")
+
+
+class AccessControlRuleExtraction(BaseModel):
+    """Categorized access control rule extraction."""
+    access_level_rules: str = Field(..., description="Core access levels and determination")
+    action_permission_matrix: str = Field(..., description="Which levels can perform which actions")
+    role_based_modifiers: str = Field(..., description="How job roles affect permissions")
+    project_based_modifiers: str = Field(..., description="How project participation affects permissions")
+    relationship_modifiers: str = Field(..., description="Manager-report, team, customer relationships")
+    special_exceptions: str = Field(..., description="Named individuals or category exceptions")
+    contextual_factors: str = Field(..., description="Time, location, data sensitivity")
+
+
+# ============================================================================
+# GLOSSARY EXTRACTION (INGESTION-TIME)
+# ============================================================================
+
+class CompanyInfo(BaseModel):
+    name: str
+    locations: List[str] = Field(..., description="City names only")
+    executives: List[str] = Field(..., description="Full names of leadership team only")
+
+class SkillOrWill(BaseModel):
+    name: str
+    description: str
+
+class SkillsAndWills(BaseModel):
+    items: List[SkillOrWill] = Field(..., description="All skills and wills mixed together")
+    general_notes: str = Field(..., description="Context about skills/wills system usage")
+
+class CategoryItem(BaseModel):
+    value: str
+    description: str
+
+class TermCategory(BaseModel):
+    items: List[CategoryItem]
+    general_notes: str = Field(..., description="Context about category purpose")
+
+class AgentGlossary(BaseModel):
+    company: CompanyInfo
+    skills_and_wills: SkillsAndWills
+    deal_phases: TermCategory
+    team_roles: TermCategory
+    time_entry_statuses: TermCategory
 
 
 extraction_prompt_public = """
@@ -280,6 +392,210 @@ Skip these even if they describe company behavior:
 """
 
 
+extraction_prompt_response = """
+<role>
+You are a Systems Architect extracting rules for the /respond tool in a categorized structure.
+</role>
+
+<system_context>
+The AI Agent is a sophisticated tool-using system. It operates in a Thought/Action loop.
+Before formulating a response, the agent has access to the following Internal Tools to read/write data:
+
+- Identity/Scope: /whoami
+- Data Retrieval: /employees/list, /employees/search, /employees/get, /wiki/list, /wiki/load, /wiki/search, /customers/list, /customers/get, /customers/search, /projects/list, /projects/get, /projects/search, /time/get, /time/search, /time/summary/by-project, /time/summary/by-employee
+- Data Modification: /employees/update, /wiki/update, /projects/team/update, /projects/status/update, /time/log, /time/update
+- Response: /respond
+
+Target Scope:
+You are NOT extracting rules for how to use the search or update tools.
+You ARE extracting rules for the final step: the usage of the /respond tool.
+</system_context>
+
+<interface_definitions>
+The agent MUST use the /respond tool to communicate. You MUST pay special attention to rules governing these specific parameters:
+
+1. Outcomes (The Outcome field):
+- ok_answer
+- ok_not_found
+- denied_security
+- none_clarification_needed
+- none_unsupported
+- error_internal
+
+2. Entity Linking (The Links array):
+- employee
+- customer
+- project
+- wiki
+- location
+
+3. Message field - the text response to the user
+
+4. Structure: Req_ProvideAgentResponse(message, outcome, links)
+</interface_definitions>
+
+<categorization_instructions>
+You MUST organize extracted rules into 4 categories:
+
+CATEGORY 1 - outcome_rules:
+Extract ALL rules about when to use each outcome type. Include rules for all 6 outcomes:
+- When to use ok_answer 
+- When to use ok_not_found
+- When to use denied_security (permissions, security constraints)
+- When to use none_clarification_needed (ambiguous requests)
+- When to use none_unsupported (features not available)
+- When to use error_internal (system failures)
+
+CATEGORY 2 - link_rules:
+Extract ALL rules about the Links array for all 5 entity kinds:
+- When to include/exclude employee links
+- When to include/exclude customer links
+- When to include/exclude project links
+- When to include/exclude wiki links
+- When to include/exclude location links
+- Rules about link IDs (internal vs public visibility)
+- Whether to link entities mentioned in denied responses
+
+CATEGORY 3 - message_formatting:
+Extract ALL rules about the message content:
+- What information is prohibited
+- What information is required (e.g., explanations for denials, or specific phrases)
+- Tone and style requirements
+
+CATEGORY 4 - general_constraints:
+Extract ALL cross-cutting rules that apply across categories:
+- Rules that span multiple outcomes or link types
+- Any rules that don't fit cleanly into the above 3 categories
+</categorization_instructions>
+
+<cohesion_guidelines>
+Do not fragment rules. To prevent loss of context:
+- If a constraint is embedded in a larger paragraph about permissions, extract the whole paragraph.
+- If a section mixes internal logic (checking access) and output logic (what to say), extract the full section.
+- It is better to include slightly more context than to cut a rule mid-sentence.
+</cohesion_guidelines>
+
+<what_to_exclude>
+Skip these even if they mention communication:
+- General company culture ("how people interact", "team prefers short updates")
+- How EMPLOYEES should communicate with customers
+- Company mission, vision, values, history, or background
+- Office atmosphere or working style
+
+If it's about human-to-human communication → EXCLUDE
+If it's about internal tool usage (not /respond output) → EXCLUDE
+</what_to_exclude>
+"""
+
+# Temporary piece of prompt
+# <output_format>
+# Rules must be compact RFC-style, ok to use pseudo code for compactness.
+# </output_format>
+
+extraction_prompt_glossary = """
+<role>
+Extract operational vocabulary that the AI agent needs to understand entities and concepts.
+</role>
+
+<task>
+Scan wiki files and extract:
+
+1. COMPANY INFO
+   - Primary company name (official legal name if available)
+   - Office locations (cities where company operates)
+   - Executives (leadership team: CEO, CTO, COO, etc.) - include names and roles
+
+2. SKILLS AND WILLS
+   - Find all skill/will definitions with names and descriptions
+   - Usually in skills.md or people profiles
+   - Provide general_notes about how skills/wills are used in the system
+
+3. DEAL PHASES
+   - Extract meaning for: idea, exploring, active, paused, archived
+   - Provide general_notes about phase lifecycle
+
+4. TEAM ROLES
+   - Extract meaning for: Lead, Engineer, Designer, QA, Ops, Other
+   - Provide general_notes about team role system
+
+5. TIME ENTRY STATUSES
+   - Extract meaning for: "" (empty string), draft, submitted, approved, invoiced, voided
+   - Provide general_notes about status workflow
+
+<extraction_principles>
+Extract ALL information related to each entity exhaustively. Include every detail found in the wiki.
+Do NOT infer or guess - only extract what is explicitly stated in the source material.
+If information is not found in the wiki, state "No info in company docs" rather than inferring or inventing details. If concept present but not defined - note accordingly.
+Capture complete descriptions, examples, and any related context that helps understand each concept.
+</extraction_principles>
+"""
+
+extraction_prompt_access_control = """
+<task>
+You are distilling company wiki files into a compact access control rulebook for an AI agent.
+
+Your goal: Transform scattered policy documents into a structured, actionable checklist that the agent can use to make access decisions in real-time.
+
+Process:
+1. Read through all wiki files systematically
+2. Identify every access control rule, policy, and permission statement
+3. Reorganize rules into 7 logical categories (see below)
+4. Rewrite each rule in compact, decision-friendly format
+5. Resolve conflicts and clarify ambiguities
+6. Create a coherent rulebook that answers: "Can user X perform action Y on resource Z?"
+Rules must be compact RFC-style, ok to use pseudo code for compactness.
+</task>
+
+<questions_by_category>
+Scan wiki files to answer these questions. Extract all relevant text verbatim.
+
+ACCESS LEVEL RULES:
+- How many access levels exist and what are they called?
+- How is a user's base access level determined?
+- What user attributes determine access level (role, department, seniority)?
+- Are there default levels for new users or public/anonymous users?
+
+ACTION PERMISSION MATRIX:
+- What read actions can each level perform?
+- What write actions can each level perform?
+- What actions are explicitly denied to each level?
+- Are there action categories or groups?
+- Can lower levels perform any admin actions?
+
+ROLE-BASED MODIFIERS:
+- What employee roles exist (PM, Dev, Manager, etc.)?
+- Do roles grant additional permissions beyond access level?
+- Can roles restrict permissions despite access level?
+- Are there role hierarchies or role combinations?
+
+PROJECT-BASED MODIFIERS:
+- Does project participation affect permissions?
+- What can project team members do that non-members cannot?
+- What can project leads do that regular team members cannot?
+- Can project permissions override access level restrictions?
+- Are there different types of project participation (active vs historical)?
+
+RELATIONSHIP MODIFIERS:
+- Does manager-report relationship affect permissions?
+- Can managers access their reports' data?
+- Can managers act on behalf of their reports?
+- Does team membership (beyond projects) grant permissions?
+- Do customer relationships affect permissions (e.g., account manager privileges)?
+
+SPECIAL EXCEPTIONS:
+- Are there named individuals with special permissions?
+- Are there employee categories with special rules?
+- What are the criteria for exception categories?
+- How do exceptions interact with standard rules (override, supplement)?
+
+CONTEXTUAL FACTORS:
+- Do temporal factors affect permissions (e.g., can only modify recent data)?
+- Do data sensitivity levels exist and affect access?
+- Does data ownership affect permissions (e.g., own time entries, own projects)?
+- Are there location-based or department-based access rules?
+</questions_by_category>
+"""
+
 validator_prompt = """
 <role>
 You are a quality validator. You assess whether a task was completed correctly.
@@ -323,47 +639,74 @@ Your validation is critical. Be thorough and precise, but stay focused on what m
 # ============================================================================
 # FILE TAGGING (INGESTION-TIME)
 # ============================================================================
-# Identifies which wiki files contain rules/policies.
+# Identifies which wiki files contain rules/policies and enriches with metadata.
+
+class FileTag(BaseModel):
+    """Metadata for a single wiki file."""
+    filename: str = Field(..., description="Wiki filename (e.g., 'rulebook.md')")
+    category: Literal["agent_directive", "agent_reference", "background_context", "human_flavor", "conditional_entity"] = Field(
+        ..., 
+        description="Agent-centric utility classification"
+    )
+    summary: str = Field(..., description="1-3 sentence inventory of file contents following template: 'Contains: [topics]. Includes: [examples].'")
+    has_rules: bool = Field(..., description="True if file contains actionable rules/policies that constrain agent behavior")
+
 
 class TaggingResponse(BaseModel):
     """Response from file tagging LLM."""
-    files_with_rules: List[str] = Field(..., description="List of filenames that contain rules/policies")
+    files: List[FileTag] = Field(..., description="Metadata for each wiki file")
 
 
 tagging_prompt = """
 <role>
-You classify wiki files for an AI agent system.
+You are creating a metadata index for an AI agent system. This index helps the agent decide which wiki files to load for each task.
 </role>
 
-<task>
-Identify files with **actionable rules** that would cause the agent to:
-- Deny or restrict a user request
-- Check permissions before acting
-- Enforce access control or data sensitivity
+<context>
+This is NOT documentation for humans - it's an agent utility index. Focus on how the agent will USE each file, not what humans would find interesting.
+</context>
 
-For each file, ask: "Does this define WHO can do WHAT, or WHEN to deny requests?"
-If no → exclude it.
+<task>
+For each wiki file, generate three metadata fields:
+
+1. **category** (single choice): How does the agent USE this file?
+   - `agent_directive`: Rules/constraints the agent MUST follow (e.g., rulebook.md, policy files)
+   - `agent_reference`: Data for answering queries - hierarchies, systems, skills definitions (e.g., hierarchy.md, skills.md, systems.md)
+   - `background_context`: Optional enrichment that improves responses but isn't required (e.g., culture.md, history/background narratives)
+   - `human_flavor`: Human-only content with no agent utility (e.g., marketing copy, mission statements)
+   - `conditional_entity`: Entity profiles useful only when task mentions that entity (e.g., people/*.md, offices/*.md)
+
+2. **summary** (1-3 sentences, ~150 characters): Inventory of file contents
+   - Template: "Contains: [data types/topics]. Includes: [specific examples]."
+   - Example: "Contains organizational structure and reporting chains. Includes CEO/CTO roles, department breakdown, manager-employee relationships."
+   - Be concrete and specific, not vague
+
+3. **has_rules** (boolean): Does this file contain actionable rules/policies that constrain agent behavior?
+   - True if: File defines WHO can do WHAT, access control, permissions, data sensitivity, response requirements
+   - True if: Contains MUST/MUST NOT/FORBIDDEN/DENIED/PROHIBITED constraints
+   - False if: Pure background, culture, profiles, history, marketing
 </task>
 
-<rules_indicators>
-- Access control definitions (who sees/modifies what)
-- Permission levels, role restrictions
-- Data classification and sensitivity
-- Explicit constraints: MUST, MUST NOT, FORBIDDEN, DENIED, PROHIBITED
-</rules_indicators>
+<category_examples>
+- rulebook.md → agent_directive (defines access rules agent must enforce)
+- hierarchy.md → agent_reference (data about org structure for queries)
+- skills.md → agent_reference (skill definitions for lookups)
+- culture.md → background_context (enrichment but not required)
+- mission_vision.md → human_flavor (no agent utility)
+- people/felix_baum.md → conditional_entity (only useful if task mentions Felix)
+- offices/munich.md → conditional_entity (only useful if task mentions Munich)
+- background.md → background_context or human_flavor (depends on content)
+</category_examples>
 
-<not_rules>
-These are NOT rules, even if they describe expected behavior:
-- Company history, founding stories, background narratives
-- Culture, traditions, rituals, values, mission/vision
-- Employee profiles, skills, reporting structures
-- Office descriptions, atmosphere, local habits
-- Marketing approach, brand guidelines
-</not_rules>
+<edge_cases>
+- If uncertain between categories, choose based on PRIMARY agent utility
+- If file has mixed purpose, select the most important use case
+- If file seems useless for agent, mark as human_flavor
+</edge_cases>
 
-<default_bias>
-Only include if you can cite specific access/permission constraints.
-</default_bias>
+<output_format>
+Return structured metadata for EVERY file provided. Do not skip any files.
+</output_format>
 """
 
 
@@ -411,7 +754,6 @@ class SingleCallERC3(BaseModel):
 class NextStepERC3Orchestrator(BaseModel):
     """Structured output for ERC3 orchestrator planning."""
     current_state: str = Field(..., description="Summarize confirmed facts: user identity, data already retrieved, outstanding blockers.")
-    rule_check: str = Field(..., description="Explicitly cite the applicable rules/policies and whether the requested action is allowed.")
     remaining_work: List[str] = Field(..., description="Numbered plan (<=5 items) from current state to completion. Update as progress is made.")
     next_action: str = Field(..., description="Describe what to do next and why it moves the plan forward.")
     call: SingleCallERC3 = Field(..., description="SDK call to execute now or /respond to finish.")
@@ -419,16 +761,18 @@ class NextStepERC3Orchestrator(BaseModel):
 
 system_prompt_erc3_orchestrator = """
 <role>
-You are the enterprise service assistant for ERC3. You help employees and guests with directory queries, project/customer lookups, wiki maintenance, and time tracking. Every action must comply with the rules included in the conversation.
+You are the enterprise AI assistant for {company_name}. Every action must comply with the rules included in the conversation.
+
+Company locations: {company_locations}
+Company executives: {company_execs}
 </role>
 
 <operating_principles>
 1. IDENTIFY the requester (session context) and confirm whether they are public or authenticated.
 2. CLASSIFY the task: data lookup, update, time logging, wiki edit, clarification, or refusal.
 3. CHECK CAPABILITIES: If the task explicitly references a system, feature, or tool not listed in your toolbox, respond with outcome="none_unsupported" - do not ask for clarification about how to use something that doesn't exist.
-4. CHECK RULES before every action, especially writes. If access is not allowed, respond with outcome="denied_security".
-5. EXECUTE the next logical SDK call. Fetch data before mutating anything.
-6. RESPOND via /respond when the task is complete or impossible.
+4. EXECUTE the next logical SDK call. Fetch data before mutating anything.
+5. RESPOND via /respond when the task is complete or impossible.
 </operating_principles>
 
 <toolbox>
@@ -442,6 +786,20 @@ You are the enterprise service assistant for ERC3. You help employees and guests
 You may call any endpoint at most once per step. Chain multiple steps if needed.
 </toolbox>
 
+<search_strategies>
+- Use /list to find an employee/customer/project by name only (no other filters). Use /search when you need to apply specific filters (e.g., location, status, department).
+- If a search tool returns no results, try easing the filters (remove or broaden criteria) before concluding data doesn't exist.
+- If unsure what to do or what rule applies to a situation, search the wiki using keywords from the task - it may contain relevant guidance or policies.
+</search_strategies>
+
+<update_operations>
+CRITICAL: The /employees/update endpoint requires ALL fields to be provided. Omitted fields will be cleared/overwritten with empty values.
+Before calling /employees/update:
+1. First fetch the current employee data (via /employees/get)
+2. In the update call, include ALL existing field values
+3. Only modify the specific fields you intend to change
+</update_operations>
+
 <outcomes>
 - ok_answer: Task completed successfully with evidence.
 - ok_not_found: Valid request but data does not exist.
@@ -451,14 +809,13 @@ You may call any endpoint at most once per step. Chain multiple steps if needed.
 - error_internal: System failure (after retries) or exceeded limits.
 </outcomes>
 <grounding>
-When calling /respond, attach AgentLink entries for every entity cited (possible kinds: employee, customer, project, wiki, location). Include ALL entities in the chain that led to your answer. Only include IDs confirmed by SDK responses.
+When calling /respond, attach AgentLink entries for every entity cited (possible kinds: employee, customer, project, wiki, location). Include ALL entities in the chain that led to your answer.
 Entities mentioned in the original task should typically be linked if they appear in respond, unless rules say otherwise.
 Note: Follow any additional specific linking rules and restrictions in the <rules>.
 </grounding>
 
 <planning_requirements>
 - Maintain an up-to-date `remaining_work` plan (<=5 bullet items).
-- `rule_check` must cite the exact rule or policy excerpt that governs the action.
 </planning_requirements>
 """
 
@@ -473,10 +830,9 @@ You validate the ERC3 orchestrator's next step before it runs. Stop rule violati
 </role>
 
 <what_you_receive>
-1. Original task description.
-2. Agent's system prompt (capabilities & duties).
-3. Conversation history (what the agent has seen).
-4. Agent's proposed step: current_state, rule_check, remaining_work, next_action, call.
+1. AGENT SYSTEM PROMPT (capabilities & duties of agent you validating).
+2. CONVERSATION HISTORY (what the agent has seen).
+3. PROPOSED NEXT STEP (current_state, rule_check, remaining_work, next_action, call).
 </what_you_receive>
 
 <validation_focus>
@@ -492,6 +848,165 @@ You validate the ERC3 orchestrator's next step before it runs. Stop rule violati
 - Keep feedback concise and actionable.
 </output_guidelines>
 """
+
+
+system_prompt_erc3_respond_validator = """
+<role>
+You are a meticulous compliance validator for /respond calls. Your task is to enforce response formatting rules with extreme rigor through structured analysis before execution.
+</role>
+
+<what_you_receive>
+1. AGENT SYSTEM PROMPT (capabilities & duties of agent you validating).
+2. CONVERSATION HISTORY (what the agent has seen).
+3. PROPOSED NEXT STEP (current_state, rule_check, remaining_work, next_action, call).
+4. Response formatting rules from wiki (embedded in this validator's system prompt below)
+</what_you_receive>
+
+<response_formatting_rules>
+{response_formatting_rules}
+</response_formatting_rules>
+
+<validation_approach>
+You will perform validation in 4 phases, evaluating each component of the /respond call systematically:
+
+PHASE 1: LINK DISCOVERY
+PHASE 2: OUTCOME EVALUATION  
+PHASE 3: MESSAGE CONTENT ANALYSIS
+PHASE 4: FINAL VERDICT
+
+Each phase builds on the previous to ensure comprehensive validation.
+</validation_approach>
+
+<phase_1_link_discovery>
+OBJECTIVE: Identify all entity candidates that appeared anywhere in the workflow.
+
+SCAN THESE SOURCES:
+- Initial context blocks (session info, employee profile, context data)
+- All tool call results (employees/get, projects/search, customers/list, wiki/load, etc.)
+- Agent's proposed message text
+- Any entity mentioned by ID or name throughout the conversation
+
+EXTRACT ENTITIES:
+For each entity found, create a LinkAnalysis entry with:
+- kind: employee, customer, project, wiki, or location
+- id: The entity's identifier as it appears
+- arguments_for_including: Why this entity should be linked (was it used to answer? mentioned in message? directly relevant?)
+- arguments_against_including: Why this entity should NOT be linked (tangential? prohibited by rules? not in agent's chosen links?)
+
+GUIDANCE:
+- When uncertain whether an entity is relevant, INCLUDE it in link_candidates
+- Focus on entities directly related to answering the user's question
+- Consider linking rules from response_formatting_rules (e.g., denied_security = no internal links)
+
+OUTPUT: Populate link_candidates field
+</phase_1_link_discovery>
+
+<phase_2_outcome_evaluation>
+OBJECTIVE: Evaluate whether the agent chose the correct outcome.
+
+THE AGENT CHOSE: Look at the proposed call to see which outcome the agent selected.
+
+YOUR TASK: For ALL 6 outcomes, provide dialectical reasoning.
+
+GUIDANCE:
+- Even if an outcome is clearly irrelevant, briefly explain why (e.g., "Not applicable - no system error occurred")
+- Outcome correctness is the foundation - if wrong outcome, everything else is moot
+- Be especially critical of the agent's chosen outcome
+
+OUTPUT: Fill all 12 outcome_* fields
+</phase_2_outcome_evaluation>
+
+<phase_3_message_content>
+OBJECTIVE: Analyze what should and shouldn't be in the message field.
+
+Based on the agent's chosen outcome and the response_formatting_rules:
+
+what_should_be_included:
+- Format: "Required by rules: [X, Y]. Answer components: [A, B, C]."
+- List mandatory elements from rules (e.g., acquisition name for public mode, denial explanation for denied_security)
+- List factual answer components that should be present
+- Cite specific rules where applicable
+
+what_should_not_be_included:
+- Format: "Prohibited: [X, Y] per [rule citation]."
+- List prohibited content from rules (e.g., salaries, internal IDs in public mode, sensitive data)
+- Cite specific rule violations if agent's message contains prohibited content
+
+DEPENDENCIES:
+- Message requirements vary by outcome (denied_security requires explanation, ok_answer requires answer content)
+- Public vs authenticated mode affects what can be disclosed
+
+OUTPUT: Fill message_analysis field
+</phase_3_message_content>
+
+<phase_4_final_verdict>
+OBJECTIVE: Synthesize all analyses into final validation decision.
+
+EVALUATE HOLISTICALLY:
+- Is the chosen outcome correct per your Phase 2 analysis?
+- Does the message comply with requirements per your Phase 3 analysis?
+- Are the links correct per your Phase 1 analysis and linking rules?
+
+is_valid:
+- Set TRUE only if ALL components are correct
+- A single violation in any component = FALSE
+
+rejection_message:
+- If invalid, structure feedback as: "OUTCOME: [issue with outcome_* fields]. MESSAGE: [issue with message_analysis]. LINKS: [issue with link_candidates]."
+- Reference specific field names from your analysis (e.g., "See outcome_denied_security_for - this outcome is more appropriate because...")
+- Be specific and actionable - what exactly must change?
+- Cite rules verbatim where applicable
+
+VALIDATION RIGOR:
+- You MUST approve ONLY if the response fully complies with every single rule without exception
+- A single rule violation MUST result in rejection
+- You MUST NOT approve responses that are "mostly correct" - full compliance is mandatory
+- Be extremely thorough - this is the final safeguard before response execution
+
+OUTPUT: Fill is_valid and rejection_message fields
+</phase_4_final_verdict>
+"""
+# For write operations (updates, creates, deletes), include links to both the modified entity and the user who performed the action, unless rules explicitly state otherwise.
+
+class LinkAnalysis(BaseModel):
+    """Analysis of a single entity link candidate."""
+    kind: Literal["employee", "customer", "project", "wiki", "location"] = Field(..., description="Type of entity")
+    id: str = Field(..., description="Entity identifier")
+    arguments_for_including: str = Field(..., description="Reasoning why this entity should be linked")
+    arguments_against_including: str = Field(..., description="Reasoning why this entity should not be linked")
+
+
+class MessageAnalysis(BaseModel):
+    """Analysis of message content requirements."""
+    what_should_be_included: str = Field(..., description="What content should be in the message (category-based with rule citations)")
+    what_should_not_be_included: str = Field(..., description="What content must not be in the message (with rule citations)")
+
+
+class ERC3RespondValidatorResponse(BaseModel):
+    """Structured validator response for /respond calls with dialectical reasoning."""
+    # Link discovery and analysis
+    link_candidates: List[LinkAnalysis] = Field(default_factory=list, description="All entities found in workflow with for/against arguments")
+    
+    # Outcome evaluation (all 6 outcomes)
+    outcome_ok_answer_for: str = Field(..., description="Evidence and reasoning supporting ok_answer outcome")
+    outcome_ok_answer_against: str = Field(..., description="Evidence and reasoning against ok_answer outcome")
+    outcome_ok_not_found_for: str = Field(..., description="Evidence and reasoning supporting ok_not_found outcome")
+    outcome_ok_not_found_against: str = Field(..., description="Evidence and reasoning against ok_not_found outcome")
+    outcome_denied_security_for: str = Field(..., description="Evidence and reasoning supporting denied_security outcome")
+    outcome_denied_security_against: str = Field(..., description="Evidence and reasoning against denied_security outcome")
+    outcome_none_clarification_needed_for: str = Field(..., description="Evidence and reasoning supporting none_clarification_needed outcome")
+    outcome_none_clarification_needed_against: str = Field(..., description="Evidence and reasoning against none_clarification_needed outcome")
+    outcome_none_unsupported_for: str = Field(..., description="Evidence and reasoning supporting none_unsupported outcome")
+    outcome_none_unsupported_against: str = Field(..., description="Evidence and reasoning against none_unsupported outcome")
+    outcome_error_internal_for: str = Field(..., description="Evidence and reasoning supporting error_internal outcome")
+    outcome_error_internal_against: str = Field(..., description="Evidence and reasoning against error_internal outcome")
+    
+    # Message content analysis
+    message_analysis: MessageAnalysis = Field(..., description="Analysis of message content requirements and prohibitions")
+    
+    # Final verdict
+    is_valid: bool = Field(..., description="True only if ALL components (outcome, message, links) are correct")
+    rejection_message: str = Field(default="", description="Structured feedback referencing specific field names when invalid")
 
 
 class ERC3StepValidatorResponse(BaseModel):

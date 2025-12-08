@@ -23,7 +23,7 @@ from infrastructure import (
 )
 from .agent_config import VALIDATOR_REGISTRY, is_terminal_action
 from .tools import execute_erc3_tools
-from .prompts import ERC3StepValidatorResponse, system_prompt_erc3_step_validator
+from .prompts import ERC3StepValidatorResponse, ERC3RespondValidatorResponse, system_prompt_erc3_step_validator
 
 
 # ============================================================================
@@ -48,35 +48,56 @@ def run_erc3_step_validator(
     validator_name = validator_config["name"]
     system_prompt = validator_config["system_prompt"]
     
-    conversation_summary = []
-    for msg in conversation:
-        role = msg.get("role", "unknown")
-        content = msg.get("content", "")
-        conversation_summary.append(f"[{role}]: {content}")
+    # Inject response formatting rules for respond validator
+    if validator_name == "ERC3RespondValidator":
+        from pathlib import Path
+        
+        # Get wiki_sha1 from task context
+        if task_ctx and task_ctx.whoami:
+            wiki_sha1 = task_ctx.whoami.get("wiki_sha1", "")[:8]
+            if wiki_sha1:
+                wiki_dir = str(Path(__file__).parent / "wiki_data" / wiki_sha1)
+                rules_path = Path(wiki_dir) / "rules" / "response_struct.md"
+                response_rules = rules_path.read_text(encoding="utf-8") if rules_path.exists() else "(no rules found)"
+                system_prompt = system_prompt.replace("{response_formatting_rules}", response_rules)
+            else:
+                system_prompt = system_prompt.replace("{response_formatting_rules}", "(wiki_sha1 not found in whoami)")
+        else:
+            system_prompt = system_prompt.replace("{response_formatting_rules}", "(task context or whoami unavailable)")
     
-    user_message = f"""Original task:
-{original_task}
-
-Agent system prompt:
+    separator = "#" * 15
+    conversation_turns = []
+    for msg in conversation:
+        role = msg.get("role", "").upper()
+        content = msg.get("content", "")
+        conversation_turns.append(f"{role}:\n{content}")
+    
+    conversation_section = f"\n\n{separator}\n\n".join(conversation_turns)
+    
+    # Format the call field as readable JSON
+    import json
+    agent_output_formatted = json.dumps(agent_output, indent=2, ensure_ascii=False)
+    
+    user_message = f"""AGENT SYSTEM PROMPT:
 {agent_system_prompt}
 
-Conversation history:
-{"\n".join(conversation_summary)}
+{separator}
 
-Proposed step:
-- Current state: {agent_output.get('current_state', 'N/A')}
-- Rule check: {agent_output.get('rule_check', 'N/A')}
-- Remaining work: {agent_output.get('remaining_work', [])}
-- Next action: {agent_output.get('next_action', 'N/A')}
-- Call: {agent_output.get('call', {})}
+{conversation_section}
 
-Is this plan safe and policy compliant?"""
+{separator}
+
+PROPOSED NEXT STEP:
+{agent_output_formatted}"""
     
     llm_start = time.time()
     
+    # Use schema from validator_config (dynamic)
+    schema = validator_config["schema"]
+    
     try:
         llm_result = call_llm(
-            schema=ERC3StepValidatorResponse,
+            schema=schema,
             system_prompt=system_prompt,
             conversation=[{"role": "user", "content": user_message}],
             task_ctx=task_ctx,
@@ -85,6 +106,43 @@ Is this plan safe and policy compliant?"""
         parsed = llm_result["parsed"]
         reasoning = llm_result["reasoning"]
         llm_duration = llm_result["timing"]
+        
+        # Build analysis string from structured fields
+        if validator_name == "ERC3RespondValidator":
+            analysis_parts = []
+            
+            # Links section
+            if parsed.link_candidates:
+                analysis_parts.append("=== LINK CANDIDATES ===")
+                for link in parsed.link_candidates:
+                    analysis_parts.append(f"\n{link.kind}/{link.id}")
+                    analysis_parts.append(f"  FOR: {link.arguments_for_including}")
+                    analysis_parts.append(f"  AGAINST: {link.arguments_against_including}")
+            
+            # Outcomes section
+            analysis_parts.append("\n\n=== OUTCOME ANALYSIS ===")
+            for outcome_name in ["ok_answer", "ok_not_found", "denied_security", 
+                                 "none_clarification_needed", "none_unsupported", "error_internal"]:
+                for_field = f"outcome_{outcome_name}_for"
+                against_field = f"outcome_{outcome_name}_against"
+                analysis_parts.append(f"\n{outcome_name}:")
+                analysis_parts.append(f"  FOR: {getattr(parsed, for_field)}")
+                analysis_parts.append(f"  AGAINST: {getattr(parsed, against_field)}")
+            
+            # Message section
+            analysis_parts.append("\n\n=== MESSAGE ANALYSIS ===")
+            analysis_parts.append(f"Should include: {parsed.message_analysis.what_should_be_included}")
+            analysis_parts.append(f"Should NOT include: {parsed.message_analysis.what_should_not_be_included}")
+            
+            analysis_str = "\n".join(analysis_parts)
+            
+            # Add analysis string to output for trace
+            output_for_trace = parsed.model_dump()
+            output_for_trace["analysis"] = analysis_str
+        else:
+            # step_validator uses simple analysis field
+            analysis_str = parsed.analysis
+            output_for_trace = parsed.model_dump()
         
         trace.append(create_validator_event(
             node_id=node_id,
@@ -95,7 +153,7 @@ Is this plan safe and policy compliant?"""
             validation_passed=parsed.is_valid,
             system_prompt=system_prompt,
             input_messages=[{"role": "user", "content": user_message}],
-            output=parsed.model_dump(),
+            output=output_for_trace,
             reasoning=reasoning,
             timing=llm_duration,
         ))
@@ -107,7 +165,7 @@ Is this plan safe and policy compliant?"""
         return {
             "is_valid": parsed.is_valid,
             "rejection_message": parsed.rejection_message,
-            "analysis": parsed.analysis,
+            "analysis": analysis_str,
         }
     
     except Exception as exc:
@@ -146,6 +204,7 @@ def validate_and_retry_erc3_step(
     step_count: int,
     trace: List[dict],
     task_ctx: TaskContext = None,
+    current_recursion_depth: int = 0,
 ) -> dict:
     """
     Validate a proposed step and retry with feedback if rejected.
@@ -162,20 +221,19 @@ def validate_and_retry_erc3_step(
             "node_id": node_id,
         }
     
-    validator_config = VALIDATOR_REGISTRY.get("step_validator")
-    if not validator_config:
-        node_id = next_node_id(parent_node_id, step_count)
-        return {
-            "llm_result": llm_result,
-            "step_count": step_count + 1,
-            "node_id": node_id,
-        }
+    # Find first matching validator
+    validator_config = None
+    for v_name, v_config in VALIDATOR_REGISTRY.items():
+        triggers = v_config["triggers_on_tools"]
+        tool_matches = isinstance(function_to_execute, triggers)
+        applies_to = v_config["applies_to_agents"]
+        agent_matches = applies_to == "*" or agent_name in applies_to
+        
+        if tool_matches and agent_matches:
+            validator_config = v_config
+            break
     
-    triggers = validator_config["triggers_on_tools"]
-    tool_matches = triggers == "*" or isinstance(function_to_execute, triggers)
-    applies_to = validator_config["applies_to_agents"]
-    agent_matches = applies_to == "*" or agent_name in applies_to
-    if not (tool_matches and agent_matches):
+    if not validator_config:
         node_id = next_node_id(parent_node_id, step_count)
         return {
             "llm_result": llm_result,
@@ -189,6 +247,15 @@ def validate_and_retry_erc3_step(
     
     for attempt in range(max_attempts + 1):
         job = current_llm_result["parsed"]
+        function_to_execute = getattr(job.call, "function", None)
+        
+        # Tool switched outside validator's scope - re-validate with correct validator
+        if not isinstance(function_to_execute, validator_config["triggers_on_tools"]):
+            if current_recursion_depth >= 3:
+                return {"llm_result": current_llm_result, "step_count": current_step_count, "node_id": next_node_id(parent_node_id, current_step_count)}
+            return validate_and_retry_erc3_step(agent_config, schema, system_prompt, conversation, current_llm_result, 
+                                                original_task, parent_node_id, current_step_count, trace, task_ctx, current_recursion_depth + 1)
+        
         node_id = next_node_id(parent_node_id, current_step_count)
         
         validation = run_erc3_step_validator(
@@ -277,7 +344,6 @@ def run_erc3_agent_loop(
     max_steps = agent_config["max_steps"]
     
     conversation = [
-        {"role": "system", "content": system_prompt},
         {"role": "user", "content": initial_context}
     ]
     latest_plan = None

@@ -51,7 +51,7 @@ def get_wiki_data_path(sha1_prefix: str = None) -> Path:
 
 def _download_wiki_files(client, wiki_dir: Path, wiki_sha1: str, benchmark_name: str, tasks: list):
     """
-    Download all wiki files and create manifest.
+    Download all wiki files and create wiki_meta.
     
     Args:
         client: SDK client for API calls
@@ -65,7 +65,7 @@ def _download_wiki_files(client, wiki_dir: Path, wiki_sha1: str, benchmark_name:
     
     print(f"  Found {len(wiki_paths)} wiki files")
     
-    manifest = {
+    wiki_meta = {
         "sha1": wiki_sha1,
         "tasks": {
             benchmark_name: tasks
@@ -93,12 +93,12 @@ def _download_wiki_files(client, wiki_dir: Path, wiki_sha1: str, benchmark_name:
         for future in as_completed(futures):
             try:
                 file_info = future.result()
-                manifest["files"].append(file_info)
+                wiki_meta["files"].append(file_info)
             except Exception as e:
                 wiki_path = futures[future]
                 print(f"    ✗ Error downloading {wiki_path}: {str(e)}")
     
-    (wiki_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (wiki_dir / "wiki_meta.json").write_text(json.dumps(wiki_meta, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"  ✓ Wiki exported to {wiki_dir}")
 
 
@@ -190,7 +190,7 @@ def ingest_wikis(benchmark_name: str):
     
     print(f"\nFound {len(sha1_to_data)} unique wiki versions")
     
-    # Step 2: Download wikis or update existing manifests
+    # Step 2: Download wikis or update existing wiki_metas
     print("\nStep 2: Processing wikis...")
     downloaded_count = 0
     updated_count = 0
@@ -201,13 +201,13 @@ def ingest_wikis(benchmark_name: str):
         client = data["client"]
         
         wiki_dir = get_wiki_data_path(hash_prefix)
-        manifest_path = wiki_dir / "manifest.json"
+        wiki_meta_path = wiki_dir / "wiki_meta.json"
         
         # Check if wiki already exists
-        if manifest_path.exists():
-            # Load existing manifest and check if this benchmark is already there
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            existing_tasks = manifest.get("tasks", {})
+        if wiki_meta_path.exists():
+            # Load existing wiki_meta and check if this benchmark is already there
+            wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
+            existing_tasks = wiki_meta.get("tasks", {})
             
             if benchmark_name in existing_tasks:
                 print(f"  {hash_prefix}: Already has {benchmark_name} tasks, skipping...")
@@ -215,8 +215,8 @@ def ingest_wikis(benchmark_name: str):
             
             # Add tasks for this benchmark
             existing_tasks[benchmark_name] = tasks
-            manifest["tasks"] = existing_tasks
-            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            wiki_meta["tasks"] = existing_tasks
+            wiki_meta_path.write_text(json.dumps(wiki_meta, indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"  {hash_prefix}: Added {len(tasks)} tasks for {benchmark_name}")
             updated_count += 1
             continue
@@ -310,20 +310,20 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
     Tag wiki files with has_rules flag using LLM.
     
     Args:
-        wiki_dir: Path to wiki directory containing manifest.json
+        wiki_dir: Path to wiki directory containing wiki_meta.json
         max_attempts: Max validation retry attempts
     
     Returns:
         Dict with counts: {"tagged": N, "with_rules": M}
     """
     wiki_path = Path(wiki_dir)
-    manifest_path = wiki_path / "manifest.json"
+    wiki_meta_path = wiki_path / "wiki_meta.json"
     
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"No manifest.json in {wiki_dir}")
+    if not wiki_meta_path.exists():
+        raise FileNotFoundError(f"No wiki_meta.json in {wiki_dir}")
     
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    files = manifest.get("files", [])
+    wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
+    files = wiki_meta.get("files", [])
     
     if not files:
         return {"tagged": 0, "with_rules": 0}
@@ -337,10 +337,10 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
             file_contents.append(f'<file name="{f["saved_as"]}">\n{content}\n</file>')
     
     all_content = "\n\n".join(file_contents)
-    original_user_message = f"Review these wiki files and identify which contain rules:\n\n{all_content}"
+    original_user_message = f"Generate metadata for these wiki files:\n\n{all_content}"
     current_user_message = original_user_message
     
-    last_result = []
+    last_result = None
     
     for attempt in range(1, max_attempts + 1):
         print(f"  Attempt {attempt}/{max_attempts}...")
@@ -353,12 +353,26 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
             reasoning_effort="high",
         )
         t_parsed = t_result["parsed"]
-        last_result = t_parsed.files_with_rules
+        last_result = t_parsed
         
-        print(f"    Found {len(last_result)} files with rules: {last_result}")
+        # Count categories and rules
+        files_with_rules = sum(1 for tag in last_result.files if tag.has_rules)
+        category_counts = {}
+        for tag in last_result.files:
+            category_counts[tag.category] = category_counts.get(tag.category, 0) + 1
         
-        # Validate
-        formatted_output = f"Files with rules: {last_result}"
+        print(f"    Tagged {len(last_result.files)} files:")
+        print(f"      - {files_with_rules} with rules")
+        print(f"      - Categories: {dict(category_counts)}")
+        
+        # Validate - format output as structured list
+        formatted_output = "File Tags:\n"
+        for tag in last_result.files:
+            formatted_output += f"\n{tag.filename}:\n"
+            formatted_output += f"  has_rules: {tag.has_rules}\n"
+            formatted_output += f"  category: {tag.category}\n"
+            formatted_output += f"  summary: {tag.summary}\n"
+        
         validator_message = f"""TASK:
 <system_prompt>
 {tagging_prompt}
@@ -372,9 +386,12 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
 {formatted_output}
 </result>
 
-Very carefully assess whether this result correctly fulfills the task. Check for both:
-1. False negatives: files that contain rules but were not listed
-2. False positives: files that were listed but don't actually contain rules"""
+Validate this result with focus on:
+1. PRIMARY (CRITICAL): Are has_rules flags accurate? Check for false positives (non-rule files marked as rules) and false negatives (rule files marked as non-rules).
+2. SECONDARY: Are category assignments appropriate based on the category definitions in the system prompt?
+3. SKIP: Do not validate summary quality - accept as-is.
+
+Be especially rigorous about has_rules accuracy as this is the most critical field."""
 
         v_result = call_llm(
             schema=ValidatorResponse,
@@ -394,21 +411,38 @@ Very carefully assess whether this result correctly fulfills the task. Check for
 
 RETRY: Previous attempt was rejected.
 
-Previous output: {last_result}
+Previous output:
+{formatted_output}
 
 Rejection feedback: {v_parsed.rejection_message}
 
 Address this feedback and try again."""
     
-    # Update manifest
-    files_with_rules_set = set(last_result)
+    # Update wiki_meta with all three fields
     for f in files:
-        f["has_rules"] = f["saved_as"] in files_with_rules_set
+        matching_tag = next((tag for tag in last_result.files if tag.filename == f["saved_as"]), None)
+        if matching_tag:
+            f["has_rules"] = matching_tag.has_rules
+            f["category"] = matching_tag.category
+            f["summary"] = matching_tag.summary
+        else:
+            print("No metadata generated for file: ", f["saved_as"])
+            f["has_rules"] = False
+            f["category"] = "human_flavor"
+            f["summary"] = "No metadata generated"
     
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    wiki_meta_path.write_text(json.dumps(wiki_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    
+    # Count final stats
+    files_with_rules_final = sum(1 for f in files if f.get("has_rules", False))
+    category_counts_final = {}
+    for f in files:
+        cat = f.get("category", "unknown")
+        category_counts_final[cat] = category_counts_final.get(cat, 0) + 1
     
     return {
         "tagged": len(files),
-        "with_rules": len(files_with_rules_set),
+        "with_rules": files_with_rules_final,
+        "categories": category_counts_final,
     }
 

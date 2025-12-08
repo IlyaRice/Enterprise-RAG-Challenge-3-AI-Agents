@@ -2,7 +2,8 @@
 ERC3 benchmark SDK tool execution and context gathering.
 
 Contains:
-- Pagination: _paginate (generic), employees_list_raw, format_employees_list
+- Pagination: _paginate (generic)
+- Directory formatters: format_employees_list, format_customers_list, format_projects_list
 - Context gathering: whoami_raw, format_whoami, employee_raw, format_employee
 - Wiki search: search_wiki, format_wiki_search (BM25 + fuzzy hybrid)
 - Context blocks: collect_context_blocks, build_orchestrator_context
@@ -11,6 +12,7 @@ Contains:
 Uses shared execute_sdk_call from infrastructure for core SDK dispatch.
 """
 
+import json
 import re
 import yaml
 from pathlib import Path
@@ -20,13 +22,13 @@ from rank_bm25 import BM25Okapi
 from rapidfuzz import fuzz
 
 from erc3.erc3.dtos import (
-    Req_WhoAmI, Req_GetEmployee, Req_ListEmployees, Req_ListCustomers, Req_ListProjects,
-    Req_SearchTimeEntries, Req_SearchProjects, ProjectTeamFilter, Req_SearchCustomers, Req_GetCustomer,
-    Req_GetProject
+    Req_WhoAmI, Req_GetEmployee, Req_GetCustomer, Req_GetProject, ProjectTeamFilter,
+    Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
+    Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
 )
-from erc3.erc3.dtos import Req_LogTimeEntry as Req_LogTimeEntry_Vendor
 from infrastructure import execute_sdk_call, dispatch_with_retry
-from .prompts import Req_LogTimeEntry
+# Import wrappers (LLM-facing, no limit/offset) - shadowing is OK, they're used in different contexts
+import benchmarks.erc3.prompts as erc3_prompts
 
 
 # ============================================================================
@@ -340,20 +342,6 @@ def _paginate(client, request_factory, result_key: str) -> dict:
     }
 
 
-def employees_list_raw(client, task_info=None) -> dict:
-    """
-    Get all employees via pagination.
-    
-    Args:
-        client: SDK client
-        task_info: Optional TaskInfo (unused, for consistent signature)
-    
-    Returns:
-        dict from _paginate with employees in "items"
-    """
-    return _paginate(client, Req_ListEmployees, "employees")
-
-
 def format_employees_list(response: dict) -> str:
     """
     Format employees list response into LLM context block.
@@ -384,7 +372,7 @@ No employees found in directory.
     for emp in items:
         emp_id = emp.get("id", "unknown")
         name = emp.get("name", "unknown")
-        lines.append(f"  {name} [employee:{emp_id}]")
+        lines.append(f"[kind=employee id={emp_id}] {name}")
     
     if not complete:
         lines.append(f"\n  [INCOMPLETE: {errors[0] if errors else 'Unknown error'}]")
@@ -397,21 +385,6 @@ No employees found in directory.
 # ============================================================================
 # CONTEXT GATHERING: CUSTOMERS LIST
 # ============================================================================
-
-def customers_list_raw(client, task_info=None) -> dict:
-    """
-    Get all customers via pagination.
-    
-    Args:
-        client: SDK client
-        task_info: Optional TaskInfo (unused, for consistent signature)
-    
-    Returns:
-        dict from _paginate with customers in "items"
-        Note: SDK returns "companies" field, we normalize to "items"
-    """
-    return _paginate(client, Req_ListCustomers, "companies")
-
 
 def format_customers_list(response: dict) -> str:
     """
@@ -443,7 +416,7 @@ No customers found in directory.
     for cust in items:
         cust_id = cust.get("id", "unknown")
         name = cust.get("name", "unknown")
-        lines.append(f"  {name} [customer:{cust_id}]")
+        lines.append(f"[kind=customer id={cust_id}] {name}")
     
     if not complete:
         lines.append(f"\n  [INCOMPLETE: {errors[0] if errors else 'Unknown error'}]")
@@ -456,20 +429,6 @@ No customers found in directory.
 # ============================================================================
 # CONTEXT GATHERING: PROJECTS LIST
 # ============================================================================
-
-def projects_list_raw(client, task_info=None) -> dict:
-    """
-    Get all projects via pagination.
-    
-    Args:
-        client: SDK client
-        task_info: Optional TaskInfo (unused, for consistent signature)
-    
-    Returns:
-        dict from _paginate with projects in "items"
-    """
-    return _paginate(client, Req_ListProjects, "projects")
-
 
 def format_projects_list(response: dict) -> str:
     """
@@ -501,8 +460,7 @@ No projects found in directory.
     for proj in items:
         proj_id = proj.get("id", "unknown")
         name = proj.get("name", "unknown")
-        customer = proj.get("customer", "unknown")
-        lines.append(f"  {name} ({customer}) [project:{proj_id}]")
+        lines.append(f"[kind=project id={proj_id}] {name}")
     
     if not complete:
         lines.append(f"\n  [INCOMPLETE: {errors[0] if errors else 'Unknown error'}]")
@@ -626,30 +584,6 @@ def user_customers_raw(client, whoami: dict) -> dict:
 
 
 # ============================================================================
-# CONTEXT GATHERING: TIME ENTRIES
-# ============================================================================
-
-def time_entries_search_raw(client, task_info=None) -> dict:
-    """
-    Get all time entries via search with no filters.
-    
-    Uses /time/search with empty filters to retrieve all entries.
-    
-    Args:
-        client: SDK client
-        task_info: Optional TaskInfo (unused, for consistent signature)
-    
-    Returns:
-        dict from _paginate with time entries in "items"
-    """
-    # Create a request factory that builds search requests with no filters
-    def request_factory(offset: int, limit: int):
-        return Req_SearchTimeEntries(offset=offset, limit=limit)
-    
-    return _paginate(client, request_factory, "entries")
-
-
-# ============================================================================
 # USER-SPECIFIC: USER'S TIME ENTRIES
 # ============================================================================
 
@@ -715,46 +649,45 @@ def whoami_raw(client, task_info=None):
 def format_whoami(response: dict) -> str:
     """
     Format whoami response into LLM context block.
-    Always returns a string (wrapped in <session_context>).
+    Always returns a string (wrapped in <whoami_session_context>).
     """
     
     # Whoami failed - critical system issue
     if response.get("error"):
         message = response.get("message", "Unknown error")
-        return f'''<session_context status="error">
+        return f'''<whoami_session_context status="error">
 SYSTEM NOTICE: Unable to verify user identity (/whoami request failed: {message}).
 
 This request will be treated as coming from a public (unauthenticated) user.
 
 If the request requires authenticated access, politely decline and explain:
 "I'm currently unable to verify your identity due to a system issue. If you believe you should have access, please contact your system administrator for assistance."
-</session_context>'''
+</whoami_session_context>'''
     
     is_public = response.get("is_public", True)
     today = response.get("today", "unknown")
     
     # Public user
     if is_public or not response.get("current_user"):
-        return f'''<session_context user="public">
+        return f'''<whoami_session_context user="public">
 You are responding to a public (unauthenticated) request.
-
 user: public
 access_level: guest
 today: {today}
-</session_context>'''
+</whoami_session_context>'''
     
     # Authenticated user
     user_id = response["current_user"]
     location = response.get("location") or "unknown"
     department = response.get("department") or "unknown"
     
-    return f'''<session_context user="{user_id}">
+    return f'''<whoami_session_context kind="employee" id="{user_id}">
 user: {user_id}
 access_level: authenticated
 location: {location}
 department: {department}
 today: {today}
-</session_context>'''
+</whoami_session_context>'''
 
 
 # ============================================================================
@@ -796,7 +729,7 @@ def format_employee(response: dict) -> str | None:
     if response.get("error") == "public_user":
         return None
     if response.get("error"):
-        return f'<employee:error>\n{response.get("message", "Unknown error")}\n</employee:error>'
+        return f'<kind=employee id=error>\n{response.get("message", "Unknown error")}\n</kind=employee id=error>'
     
     employee = response.get("employee")
     if not employee:
@@ -811,7 +744,7 @@ def format_employee(response: dict) -> str | None:
     wills_str = ", ".join(f"{w['name']}:{w['level']}" for w in wills) if wills else "none"
     
     lines = [
-        f"<employee:{emp_id}>",
+        f"<kind=employee id={emp_id}>",
         f"name: {employee.get('name', 'unknown')}",
         f"email: {employee.get('email', 'unknown')}",
         f"location: {employee.get('location', 'unknown')}",
@@ -820,7 +753,7 @@ def format_employee(response: dict) -> str | None:
         f"notes: {employee.get('notes', '')}",
         f"skills: {skills_str}",
         f"wills: {wills_str}",
-        f"</employee:{emp_id}>",
+        f"</kind=employee id={emp_id}>",
     ]
     return "\n".join(lines)
 
@@ -845,10 +778,10 @@ def format_project_block(project: dict) -> ContextBlock:
     name = project.get("name", "Unknown Project")
     status = project.get("status", "unknown")
     
-    content = _format_entity(project, f"project:{proj_id}")
+    content = _format_entity(project, f"kind=project id={proj_id}")
     summary = f'"{name}" - {status}'
     
-    return ContextBlock(name=f"project:{proj_id}", summary=summary, content=content)
+    return ContextBlock(name=f"kind=project id={proj_id}", summary=summary, content=content)
 
 
 def format_customer_block(customer: dict) -> ContextBlock:
@@ -866,12 +799,12 @@ def format_customer_block(customer: dict) -> ContextBlock:
     location = customer.get("location", "unknown")
     deal_phase = customer.get("deal_phase", "unknown")
     
-    content = _format_entity(customer, f"customer:{cust_id}")
+    content = _format_entity(customer, f"kind=customer id={cust_id}")
     
     # Summary for block list
     summary = f'"{name}" - {location} - {deal_phase}'
     
-    return ContextBlock(name=f"customer:{cust_id}", summary=summary, content=content)
+    return ContextBlock(name=f"kind=customer id={cust_id}", summary=summary, content=content)
 
 
 def format_time_entry_block(entry: dict) -> ContextBlock:
@@ -889,10 +822,10 @@ def format_time_entry_block(entry: dict) -> ContextBlock:
     hours = entry.get("hours", 0)
     project = entry.get("project", "none")
     
-    content = _format_entity(entry, f"time_entry:{entry_id}")
+    content = _format_entity(entry, f"kind=time_entry id={entry_id}")
     summary = f"{date} - {hours}h - {project}"
     
-    return ContextBlock(name=f"time_entry:{entry_id}", summary=summary, content=content)
+    return ContextBlock(name=f"kind=time_entry id={entry_id}", summary=summary, content=content)
 
 
 
@@ -1057,8 +990,6 @@ def build_orchestrator_context(
     return "\n\n".join(parts)
 
 
-
-
 # ============================================================================
 # SDK TOOL EXECUTION
 # ============================================================================
@@ -1076,9 +1007,106 @@ def execute_single_call(function, benchmark_client) -> dict:
         - "text": formatted response string for conversation log
         - "tool_call": {request, response} dict for trace
     """
-    # Convert wrapper classes back to vendored SDK DTOs
-    if isinstance(function, Req_LogTimeEntry):
-        function = Req_LogTimeEntry_Vendor(**function.model_dump())
+    # Wrapper: Log time entry (field ordering fix)
+    if isinstance(function, erc3_prompts.Req_LogTimeEntry):
+        function = Req_LogTimeEntry(**function.model_dump())
+    
+    # Wrappers: List endpoints (autopaginated, formatted as directories)
+    elif isinstance(function, erc3_prompts.Req_ListEmployees):
+        result = _paginate(benchmark_client, Req_ListEmployees, "employees")
+        formatted = format_employees_list(result)
+        return {
+            "text": formatted,
+            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
+        }
+    
+    elif isinstance(function, erc3_prompts.Req_ListCustomers):
+        result = _paginate(benchmark_client, Req_ListCustomers, "companies")
+        formatted = format_customers_list(result)
+        return {
+            "text": formatted,
+            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
+        }
+    
+    elif isinstance(function, erc3_prompts.Req_ListProjects):
+        result = _paginate(benchmark_client, Req_ListProjects, "projects")
+        formatted = format_projects_list(result)
+        return {
+            "text": formatted,
+            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
+        }
+    
+    # Wrappers: Search endpoints (autopaginated with filters)
+    elif isinstance(function, erc3_prompts.Req_SearchEmployees):
+        params = function.model_dump(exclude={'tool'})
+        result = _paginate(
+            benchmark_client,
+            lambda offset, limit: Req_SearchEmployees(**params, offset=offset, limit=limit),
+            "employees"
+        )
+        response_dict = {"employees": result["items"]}
+        if not result["complete"] and result["errors"]:
+            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
+        return {
+            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
+            "tool_call": {"request": params, "response": response_dict}
+        }
+    
+    elif isinstance(function, erc3_prompts.Req_SearchCustomers):
+        params = function.model_dump(exclude={'tool'})
+        result = _paginate(
+            benchmark_client,
+            lambda offset, limit: Req_SearchCustomers(**params, offset=offset, limit=limit),
+            "companies"
+        )
+        response_dict = {"companies": result["items"]}
+        if not result["complete"] and result["errors"]:
+            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
+        return {
+            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
+            "tool_call": {"request": params, "response": response_dict}
+        }
+    
+    elif isinstance(function, erc3_prompts.Req_SearchProjects):
+        params = function.model_dump(exclude={'tool'})
+        result = _paginate(
+            benchmark_client,
+            lambda offset, limit: Req_SearchProjects(**params, offset=offset, limit=limit),
+            "projects"
+        )
+        response_dict = {"projects": result["items"]}
+        if not result["complete"] and result["errors"]:
+            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
+        return {
+            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
+            "tool_call": {"request": params, "response": response_dict}
+        }
+    
+    elif isinstance(function, erc3_prompts.Req_SearchTimeEntries):
+        params = function.model_dump(exclude={'tool'})
+        result = _paginate(
+            benchmark_client,
+            lambda offset, limit: Req_SearchTimeEntries(**params, offset=offset, limit=limit),
+            "entries"
+        )
+        response_dict = {"entries": result["items"]}
+        # Capture summary fields from first item's response (they're global totals from server)
+        if result["items"] and result["complete"]:
+            # Make one call to get summaries
+            try:
+                resp = dispatch_with_retry(benchmark_client, Req_SearchTimeEntries(**params, offset=0, limit=1))
+                if hasattr(resp, 'total_hours'):
+                    response_dict['total_hours'] = resp.total_hours
+                    response_dict['total_billable'] = resp.total_billable
+                    response_dict['total_non_billable'] = resp.total_non_billable
+            except:
+                pass
+        if not result["complete"] and result["errors"]:
+            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
+        return {
+            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
+            "tool_call": {"request": params, "response": response_dict}
+        }
     
     # Standard SDK dispatch via shared infrastructure
     return execute_sdk_call(function, benchmark_client)
