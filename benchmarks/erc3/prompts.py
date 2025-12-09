@@ -177,6 +177,59 @@ Output the block names exactly as shown in the available blocks list.
 
 
 # ============================================================================
+# ACCESS EVALUATOR
+# ============================================================================
+# Preliminary access control analysis for tasks.
+
+class AccessEvaluation(BaseModel):
+    """Access evaluator's preliminary permission analysis."""
+    reasoning: str = Field(..., description="Structured analysis: user level, action type, applicable rule, conditional factor if any")
+    determination: Literal["PERMITTED", "DENIED", "CONDITIONAL"] = Field(..., description="PERMITTED if allowed, DENIED if prohibited, CONDITIONAL if depends on discoverable factor")
+    conditional_factor: str | None = Field(default=None, description="If CONDITIONAL: specific factor to check during execution, phrased as clear condition")
+
+
+system_prompt_access_evaluator = """
+<role>
+You are a preliminary access analyst. Your output guides an AI agent that will execute the user's task.
+Analyze whether the AI agent can execute the user's request based on the user's identity and access control rules.
+</role>
+
+<scope>
+Focus ONLY on permission rules based on user identity and role.
+Ask yourself: "Is this about WHO can do this action, or about WHETHER this specific input is valid?"
+- WHO can do it → in scope (user level, role, relationships, ownership)
+- WHETHER input is valid → out of scope (data formats, business process compliance, JIRA requirements)
+</scope>
+
+<reasoning_structure>
+Follow this structure (one sentence each):
+1. User's access level and how determined
+2. Action category (read/write/admin)
+3. Applicable rule outcome
+4. Conditional factor if permission depends on discoverable data
+5. Why you chose PERMITTED/DENIED/CONDITIONAL
+
+Do not cite rule section numbers or copy rule text verbatim.
+</reasoning_structure>
+
+<determinations>
+- PERMITTED: Rules clearly allow this action for this user
+- DENIED: Rules clearly prohibit this action for this user
+- CONDITIONAL: Permission depends on a factor that can be discovered through normal tool execution
+</determinations>
+
+<conditional_factor_guidance>
+If CONDITIONAL, specify what must be true for permission. Be specific about:
+- The exact relationship to check (e.g., "whether user is lead of the mentioned project")
+- The parties involved (use names from the task)
+- The expected outcomes: if true → permitted, if false → denied
+
+The agent will discover this through normal data retrieval, not by asking the user.
+</conditional_factor_guidance>
+"""
+
+
+# ============================================================================
 # RULE BUILDER
 # ============================================================================
 # Extracts relevant rule chunks from wiki files.
@@ -774,6 +827,10 @@ Company executives: {company_execs}
 4. EXECUTE the next logical SDK call. Fetch data before mutating anything.
 5. RESPOND via /respond when the task is complete or impossible.
 </operating_principles>
+
+<access_guidance_usage>
+If access_guidance block is present, use it to inform your approach. For CONDITIONAL determinations, discover the specified factor through normal tool execution - do not ask the user to verify it.
+</access_guidance_usage>
 
 <toolbox>
 - Employees: /employees/list, /employees/search, /employees/get, /employees/update

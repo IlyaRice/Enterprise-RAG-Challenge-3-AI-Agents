@@ -16,11 +16,14 @@ from langfuse import observe, get_client
 from infrastructure import call_llm
 from .tools import CollectedContext
 from .prompts import (
+    AccessEvaluation,
     ContextSelection,
     RuleSelection,
+    system_prompt_access_evaluator,
     system_prompt_context_builder,
     system_prompt_rule_builder,
 )
+from .rules import load_access_control_rules
 from infrastructure import TaskContext
 
 
@@ -105,6 +108,7 @@ def run_context_builder(
     task_text: str,
     collected: CollectedContext,
     task_ctx: TaskContext = None,
+    **_lf: Any,  # Langfuse kwargs for thread context propagation
 ) -> List[str]:
     """
     Run context builder to select relevant blocks for a task.
@@ -165,6 +169,84 @@ def run_context_builder(
         # On error, return all blocks (fail-safe)
         print(f"✗ Context builder error: {e}, returning all blocks")
         return list(collected.blocks.keys())
+
+
+# ============================================================================
+# ACCESS EVALUATOR
+# ============================================================================
+
+@observe()
+def run_access_evaluator(
+    task_text: str,
+    collected: CollectedContext,
+    whoami: dict,
+    task_ctx: TaskContext = None,
+    **_lf: Any,  # Langfuse kwargs for thread context propagation
+) -> str:
+    """
+    Run preliminary access evaluation for a task.
+    
+    Analyzes whether the user can perform the requested actions based on
+    their identity and company access control rules.
+    """
+    # Load access control rules
+    access_rules = load_access_control_rules(whoami)
+    if not access_rules:
+        return ""
+    
+    # Build user message with session, employee, rules, task
+    parts = ["<session_context>", collected.session_content, "</session_context>"]
+    
+    if collected.employee_content:
+        parts.append("\n<employee_profile>")
+        parts.append(collected.employee_content)
+        parts.append("</employee_profile>")
+    else:
+        parts.append("\n<employee_profile>")
+        parts.append("(No employee profile - public/anonymous user)")
+        parts.append("</employee_profile>")
+    
+    parts.append("\n<access_control_rules>")
+    parts.append(access_rules)
+    parts.append("</access_control_rules>")
+    
+    parts.append("\n<task>")
+    parts.append(task_text)
+    parts.append("</task>")
+    
+    user_message = "\n".join(parts)
+    
+    # Call LLM
+    try:
+        llm_result = call_llm(
+            schema=AccessEvaluation,
+            system_prompt=system_prompt_access_evaluator,
+            conversation=[{"role": "user", "content": user_message}],
+            task_ctx=task_ctx,
+        )
+        
+        parsed = llm_result["parsed"]
+        
+        # Format output as access_guidance block
+        output_parts = [
+            "<access_guidance>",
+            "Note: Preliminary analysis - discover conditional factors during execution.",
+            "",
+            parsed.reasoning,
+            "",
+            f"Determination: {parsed.determination}",
+        ]
+        
+        if parsed.conditional_factor:
+            output_parts.append(f"Conditional: {parsed.conditional_factor}")
+        
+        output_parts.append("</access_guidance>")
+        
+        return "\n".join(output_parts)
+        
+    except Exception as e:
+        print(f"✗ Access evaluator error: {e}, skipping access hints")
+        return ""
 
 
 # ============================================================================

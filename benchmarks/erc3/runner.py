@@ -5,6 +5,7 @@ Coordinates context gathering, orchestrator execution, and evaluation.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -17,7 +18,7 @@ from erc3.erc3.dtos import Req_ProvideAgentResponse
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
 from .agent_config import AGENT_REGISTRY
-from .context_rules import run_context_builder
+from .context_rules import run_context_builder, run_access_evaluator
 from .loop import run_erc3_agent_loop
 from .rules import load_rules_for_session
 from .tools import (
@@ -133,8 +134,45 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     whoami = whoami_raw(benchmark_client)
     task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME, whoami=whoami)
     collected = collect_context_blocks(benchmark_client, task)
-    selected_blocks = run_context_builder(task.task_text, collected, task_ctx)
-    base_context = build_orchestrator_context(collected, selected_blocks)
+    
+    # Run context_builder and access_evaluator in parallel
+    lf = get_client()
+    trace_id = lf.get_current_trace_id()
+    parent_obs_id = lf.get_current_observation_id()
+    
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_context = executor.submit(
+            run_context_builder,
+            task.task_text,
+            collected,
+            task_ctx,
+            langfuse_trace_id=trace_id,
+            langfuse_parent_observation_id=parent_obs_id,
+        )
+        future_access = executor.submit(
+            run_access_evaluator,
+            task.task_text,
+            collected,
+            whoami,
+            task_ctx,
+            langfuse_trace_id=trace_id,
+            langfuse_parent_observation_id=parent_obs_id,
+        )
+        
+        # Get results with independent fallbacks
+        try:
+            selected_blocks = future_context.result()
+        except Exception as e:
+            print(f"✗ Context builder error: {e}, returning all blocks")
+            selected_blocks = list(collected.blocks.keys())
+        
+        try:
+            access_hints = future_access.result()
+        except Exception as e:
+            print(f"✗ Access evaluator error: {e}, skipping access hints")
+            access_hints = ""
+    
+    base_context = build_orchestrator_context(collected, selected_blocks, access_hints)
     rules = load_rules_for_session(whoami)
     
     # Load company info and format system prompt

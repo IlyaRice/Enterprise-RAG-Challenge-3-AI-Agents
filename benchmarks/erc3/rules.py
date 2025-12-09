@@ -36,8 +36,8 @@ CATEGORY_PROMPTS = {
 }
 
 
-def _load_rule_files(wiki_dir: str, all_files: bool = False) -> str:
-    """Load and concatenate rule files with <wiki:path> tags."""
+def _load_rule_files(wiki_dir: str, tags: List[str]) -> str:
+    """Load and concatenate rule files with <wiki:path> tags based on category tags."""
     wiki_path = Path(wiki_dir)
     wiki_meta_path = wiki_path / "wiki_meta.json"
     
@@ -46,10 +46,11 @@ def _load_rule_files(wiki_dir: str, all_files: bool = False) -> str:
     
     wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
     
-    if all_files:
-        files_to_load = wiki_meta.get("files", [])
-    else:
-        files_to_load = [f for f in wiki_meta.get("files", []) if f.get("has_rules", False)]
+    # Filter files by category matching any of the provided tags
+    files_to_load = [
+        f for f in wiki_meta.get("files", []) 
+        if f.get("category") in tags
+    ]
     
     if not files_to_load:
         return ""
@@ -219,7 +220,7 @@ def extract_rules_for_category(wiki_dir: str, category: str, max_attempts: int =
     if category not in CATEGORY_PROMPTS:
         raise ValueError(f"Unknown category: {category}. Use 'public' or 'authenticated'.")
     
-    wiki_content = _load_rule_files(wiki_dir)
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
     if not wiki_content:
         return ""
     
@@ -290,12 +291,12 @@ def load_rules(wiki_dir: str, category: str) -> str | None:
 
 
 def extract_response_formatting_rules(wiki_dir: str, max_attempts: int = 4) -> str:
-    """Extract categorized response rules from ALL wiki files."""
-    wiki_content = _load_rule_files(wiki_dir, all_files=True)
+    """Extract categorized response rules from wiki files with specified tags."""
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
     if not wiki_content:
         return ""
     
-    print("Extracting categorized response rules from ALL wiki files...")
+    print("Extracting categorized response rules from wiki files...")
     
     original_user_message = f"Extract all relevant content from the following wiki files:\n\n{wiki_content}"
     current_user_message = original_user_message
@@ -365,12 +366,12 @@ Address this feedback and try again."""
 
 
 def extract_access_control_rules(wiki_dir: str, max_attempts: int = 4) -> str:
-    """Extract categorized access control rules from ALL wiki files."""
-    wiki_content = _load_rule_files(wiki_dir, all_files=True)
+    """Extract categorized access control rules from wiki files with specified tags."""
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
     if not wiki_content:
         return ""
     
-    print("Extracting categorized access control rules from ALL wiki files...")
+    print("Extracting categorized access control rules from wiki files...")
     
     original_user_message = f"Extract all relevant content from the following wiki files:\n\n{wiki_content}"
     current_user_message = original_user_message
@@ -469,9 +470,27 @@ def load_rules_for_session(whoami: dict) -> str:
     return load_rules(wiki_dir, category) or ""
 
 
+def load_access_control_rules(whoami: dict) -> str:
+    """Load pre-extracted access control rules for access evaluation."""
+    # Handle whoami errors
+    if whoami.get("error"):
+        return ""
+    
+    wiki_sha1 = whoami.get("wiki_sha1", "")
+    if not wiki_sha1:
+        return ""
+    
+    wiki_dir = Path(__file__).parent / "wiki_data" / wiki_sha1[:8]
+    rules_path = wiki_dir / "rules" / "access_control_.md"
+    
+    if rules_path.exists():
+        return rules_path.read_text(encoding="utf-8")
+    return ""
+
+
 def extract_agent_glossary(wiki_dir: str, max_attempts: int = 4) -> Path:
     """Extract operational vocabulary. Saves to rules/glossary.json."""
-    wiki_content = _load_rule_files(wiki_dir, all_files=True)
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference", "conditional_entity", "background_context"])
     if not wiki_content:
         return Path(wiki_dir) / "rules" / "glossary.json"
     
