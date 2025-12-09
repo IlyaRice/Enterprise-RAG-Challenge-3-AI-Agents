@@ -123,6 +123,15 @@ class Req_SearchTimeEntries(BaseModel):
 
 
 # ============================================================================
+# INTERNAL TOOLS (NOT SDK CALLS)
+# ============================================================================
+
+class Req_LoadRespondInstructions(BaseModel):
+    """Load response formatting instructions. MUST call once before /respond."""
+    tool: Literal["/load-respond-instructions"] = "/load-respond-instructions"
+
+
+# ============================================================================
 # CONTEXT BUILDER
 # ============================================================================
 # Selects relevant context blocks for the task.
@@ -367,83 +376,61 @@ class AgentGlossary(BaseModel):
 
 
 extraction_prompt_public = """
-<role>
-You are a rule extraction assistant.
-</role>
+Your task is to retrieve a subset of rules for a corporate AI chatbot agent. 
+However, at this stage, any rules concerning AUTHENTICATED users (logged-in employees, staff members) are completely irrelevant. 
+Also completely irrelevant are rules concerning response formatting using the /respond tool.
+Extract all rules concerning PUBLIC users (guests, anonymous visitors, unauthenticated users), except for rules about response formatting.
 
-<context>
-We are building an AI agent that assists users. The agent needs rules to guide its behavior.
-This extraction is for rules that apply when the agent handles requests from PUBLIC users (guests, anonymous users, unauthenticated visitors).
-</context>
 
-<task>
-Extract ALL content that applies to PUBLIC users (guests, anonymous users, unauthenticated users, public chatbot users).
-Work methodically: scan each file section-by-section, checking every paragraph against the inclusion criteria before deciding to skip it. "Does this mention public/guest/anonymous/visitor/unauthenticated users, or does it define what they can/cannot access?" If yes, include it. If unsure, include it.
-</task>
+Specifically, omit:
+- Any rules concerning determining permissions and access rights for AUTHENTICATED users of any level.
+- Any information concerning AUTHENTICATED users.
 
-<what_to_include>
-- Sections that define what public users can access or do
-- Rules about public website agent behavior
-- Data classifications that mention "public"
-- Examples involving public/guest users
-- Any content mentioning: public, guest, anonymous, visitor, unauthenticated
-</what_to_include>
+- Any rules about how to choose the outcome field for the respond (ok_answer, ok_not_found, denied_security, etc.)
+- Any rules about attaching links to responses in the respond
+- Any rules about formulating response messages in the respond
+- Any other guidance on using the /respond tool
 
-<extraction_rules>
-1. Copy text EXACTLY as written - do not paraphrase, summarize, or change wording. Preserve all markdown syntax.
-2. Include section headers (##, ###) to maintain document structure
-3. Keep continuous blocks together, use [...] for gaps between relevant sections
-4. One entry per source file that has relevant content
+Keep everything else:
+- All rules about what actions PUBLIC users can perform
+- All rules about what information PUBLIC users can access
+- All permission and prohibition rules related to PUBLIC users.
+- All data access restrictions related to PUBLIC users.
+- All other AI agent behavioral rules related to PUBLIC users.
+- ALL general rules that cannot be clearly attributed to either PUBLIC or AUTHENTICATED users should be included to ensure complete coverage.
 
-When in doubt, include it - it's better to have extra context than to miss something relevant.
-</extraction_rules>
+For intertwined content: surgically extract only what's relevant, preserving original phrasing with minimal adaptation.
+
+Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
 """
-
 
 extraction_prompt_authenticated = """
-<role>
-You are a rule extraction assistant.
-</role>
+Your task is to retrieve a subset of rules for a corporate AI chatbot agent. 
+However, at this stage, any rules concerning PUBLIC users (guests, anonymous visitors, unauthenticated users) are completely irrelevant. 
+Also completely irrelevant are rules concerning response formatting using the /respond tool.
+Extract all rules concerning AUTHENTICATED users (logged-in employees, staff members), except for rules about response formatting.
 
-<context>
-We are building an AI agent. Extract rules that the agent must enforce when handling requests from AUTHENTICATED users (logged-in employees).
-</context>
+Specifically, omit:
+- Any rules concerning determining permissions and access rights for PUBLIC users.
+- Any information concerning PUBLIC users.
 
-<task>
-Extract content that defines **actionable constraints** - things that would cause the agent to:
-- Deny or restrict a user request
-- Check permissions before acting
-- Require specific formats, codes, or approvals
-- Treat data as sensitive or restricted
+- Any rules about how to choose the outcome field for the respond (ok_answer, ok_not_found, denied_security, etc.)
+- Any rules about attaching links to responses in the respond
+- Any rules about formulating response messages in the respond
+- Any other guidance on using the /respond tool
 
-For each section, ask: "Would the agent use this to decide YES/NO on a request?"
-If no - skip it.
-</task>
+Keep everything else:
+- All rules about what actions AUTHENTICATED users can perform
+- All rules about what information AUTHENTICATED users can access
+- All permission and prohibition rules related to AUTHENTICATED users.
+- All data access restrictions related to AUTHENTICATED users.
+- All other AI agent behavioral rules related to AUTHENTICATED users.
+- ALL general rules that cannot be clearly attributed to either PUBLIC or AUTHENTICATED users should be included to ensure complete coverage.
 
-<what_to_include>
-- Access control (who can see/modify what by level)
-- Permission rules (who can do what actions)
-- Data sensitivity classifications
-- Required response formats
-- Explicit constraints: MUST, MUST NOT, FORBIDDEN, DENIED
-</what_to_include>
+For intertwined content: surgically extract only what's relevant, preserving original phrasing with minimal adaptation.
 
-<not_rules>
-Skip these even if they describe company behavior:
-- Cultural norms and traditions
-- Stories and anecdotes
-- Values and mission statements
-</not_rules>
-
-<extraction_rules>
-1. Copy text EXACTLY - preserve markdown syntax
-2. Include section headers for structure
-3. Use [...] for gaps between relevant sections
-4. One entry per source file with relevant content
-5. When uncertain → **exclude** (less noise is better than extra context)
-</extraction_rules>
+Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
 """
-
 
 extraction_prompt_response = """
 <role>
@@ -544,6 +531,62 @@ If it's about internal tool usage (not /respond output) → EXCLUDE
 # <output_format>
 # Rules must be compact RFC-style, ok to use pseudo code for compactness.
 # </output_format>
+
+extraction_prompt_respond_public = """
+Your task is to retrieve respond rules for PUBLIC users (guests, anonymous visitors, unauthenticated users) from a corporate AI chatbot agent. 
+
+CONTEXT: You will be provided with:
+1. ALREADY EXTRACTED PUBLIC RULES - these are the general rules we already have for public users
+2. WIKI FILES - the source material containing all rules
+
+Your job is to extract ONLY the respond-related rules that are NOT already covered in the existing public rules.
+
+Specifically, extract rules about:
+- When to use each outcome field for the /respond tool (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
+- How to attach links to responses for PUBLIC users
+- How to formulate response messages for PUBLIC users
+- Any other guidance on using the /respond tool for PUBLIC users
+
+DO NOT extract:
+- General access control rules (already in existing rules)
+- General permission rules (already in existing rules)
+- Rules about internal tool usage (search, update, etc.)
+- Rules that apply to AUTHENTICATED users only
+
+IMPORTANT: Review the ALREADY EXTRACTED PUBLIC RULES carefully. Do not duplicate content that's already there. Extract only respond-specific rules that add new information.
+
+For intertwined content: surgically extract only what's relevant to respond tool usage for PUBLIC users, preserving original phrasing with minimal adaptation.
+
+Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
+"""
+
+extraction_prompt_respond_authenticated = """
+Your task is to retrieve respond rules for AUTHENTICATED users (logged-in employees, staff members) from a corporate AI chatbot agent.
+
+CONTEXT: You will be provided with:
+1. ALREADY EXTRACTED AUTHENTICATED RULES - these are the general rules we already have for authenticated users
+2. WIKI FILES - the source material containing all rules
+
+Your job is to extract ONLY the respond-related rules that are NOT already covered in the existing authenticated rules.
+
+Specifically, extract rules about:
+- When to use each outcome field for the /respond tool (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
+- How to attach links to responses for AUTHENTICATED users
+- How to formulate response messages for AUTHENTICATED users
+- Any other guidance on using the /respond tool for AUTHENTICATED users
+
+DO NOT extract:
+- General access control rules (already in existing rules)
+- General permission rules (already in existing rules)
+- Rules about internal tool usage (search, update, etc.)
+- Rules that apply to PUBLIC users only
+
+IMPORTANT: Review the ALREADY EXTRACTED AUTHENTICATED RULES carefully. Do not duplicate content that's already there. Extract only respond-specific rules that add new information.
+
+For intertwined content: surgically extract only what's relevant to respond tool usage for AUTHENTICATED users, preserving original phrasing with minimal adaptation.
+
+Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
+"""
 
 extraction_prompt_glossary = """
 <role>
@@ -770,6 +813,8 @@ Return structured metadata for EVERY file provided. Do not skip any files.
 ERC3_SDK_TOOLS = Union[
     # Terminal action
     Req_ProvideAgentResponse,
+    # Internal tools
+    Req_LoadRespondInstructions,
     # Employee directory
     Req_ListEmployees,
     Req_SearchEmployees,
@@ -825,20 +870,29 @@ Company executives: {company_execs}
 2. CLASSIFY the task: data lookup, update, time logging, wiki edit, clarification, or refusal.
 3. CHECK CAPABILITIES: If the task explicitly references a system, feature, or tool not listed in your toolbox, respond with outcome="none_unsupported" - do not ask for clarification about how to use something that doesn't exist.
 4. EXECUTE the next logical SDK call. Fetch data before mutating anything.
-5. RESPOND via /respond when the task is complete or impossible.
+5. LOAD RESPOND INSTRUCTIONS: Before calling /respond, call /load-respond-instructions ONCE.
+6. RESPOND via /respond when the task is complete or impossible.
 </operating_principles>
+
+<respond_instructions_requirement>
+CRITICAL: Before calling /respond, you MUST call /load-respond-instructions to load response formatting rules.
+- Call it EXACTLY ONCE per session, when ready to formulate your final response
+- Do NOT call it more than once - rules don't change during a session
+- Do NOT call /respond without loading instructions first
+</respond_instructions_requirement>
 
 <access_guidance_usage>
 If access_guidance block is present, use it to inform your approach. For CONDITIONAL determinations, discover the specified factor through normal tool execution - do not ask the user to verify it.
 </access_guidance_usage>
 
 <toolbox>
+- Response: /load-respond-instructions (MUST call once before /respond)
 - Employees: /employees/list, /employees/search, /employees/get, /employees/update
 - Customers: /customers/list, /customers/search, /customers/get
 - Projects: /projects/list, /projects/search, /projects/get, /projects/team/update, /projects/status/update
 - Wiki: /wiki/load, /wiki/search, /wiki/update (create/update/delete)
 - Time: /time/log, /time/update, /time/get, /time/search, /time/summary/project, /time/summary/employee
-- Completion: /respond (final answer with outcome + links)
+- Completion: /respond (final answer with outcome + links) - requires /load-respond-instructions first
 
 You may call any endpoint at most once per step. Chain multiple steps if needed.
 </toolbox>

@@ -29,6 +29,7 @@ from erc3.erc3.dtos import (
 from infrastructure import execute_sdk_call, dispatch_with_retry
 # Import wrappers (LLM-facing, no limit/offset) - shadowing is OK, they're used in different contexts
 import benchmarks.erc3.prompts as erc3_prompts
+from .rules import load_respond_rules_for_session
 
 
 # ============================================================================
@@ -1000,19 +1001,25 @@ def build_orchestrator_context(
 # SDK TOOL EXECUTION
 # ============================================================================
 
-def execute_single_call(function, benchmark_client) -> dict:
+def execute_single_call(function, benchmark_client, task_ctx=None) -> dict:
     """
     Execute a single SDK tool call for ERC3 benchmark.
     
     Args:
         function: SDK request object or custom wrapper tool
         benchmark_client: SDK client for API calls
+        task_ctx: TaskContext for internal tools needing whoami
     
     Returns:
-        dict with:
-        - "text": formatted response string for conversation log
-        - "tool_call": {request, response} dict for trace
+        dict with "text" and "tool_call"
     """
+    # Internal tool: Load respond instructions
+    if isinstance(function, erc3_prompts.Req_LoadRespondInstructions):
+        whoami = task_ctx.whoami if task_ctx else None
+        rules = load_respond_rules_for_session(whoami) if whoami else ""
+        text = f"<respond_instructions>\n{rules or '(No respond instructions found)'}\n</respond_instructions>"
+        return {"text": text, "tool_call": {"request": {}, "response": {"loaded": bool(rules)}}}
+    
     # Wrapper: Log time entry (field ordering fix)
     if isinstance(function, erc3_prompts.Req_LogTimeEntry):
         function = Req_LogTimeEntry(**function.model_dump())
@@ -1122,30 +1129,11 @@ def execute_single_call(function, benchmark_client) -> dict:
 # MAIN ENTRY POINT
 # ============================================================================
 
-def execute_erc3_tools(job, benchmark_client) -> dict:
-    """
-    Execute SDK tool(s) for ERC3 benchmark.
-    
-    This is the main entry point called by run_agent_loop via tool_executor.
-    Currently only supports single call mode.
-    
-    Args:
-        job: Parsed LLM output with call.function
-        benchmark_client: SDK client for ERC3 API calls
-    
-    Returns:
-        dict with:
-        - "text": Formatted response for conversation
-        - "tool_calls": List of {request, response} dicts for trace
-        - "function": The function executed (for display)
-    """
+def execute_erc3_tools(job, benchmark_client, task_ctx=None) -> dict:
+    """Execute SDK tool(s) for ERC3 benchmark. Returns dict with text, tool_calls, function."""
     if job.call.call_mode == "single":
         function = job.call.function
-        result = execute_single_call(function, benchmark_client)
-        return {
-            "text": result["text"],
-            "tool_calls": [result["tool_call"]],
-            "function": function,
-        }
+        result = execute_single_call(function, benchmark_client, task_ctx)
+        return {"text": result["text"], "tool_calls": [result["tool_call"]], "function": function}
     else:
         raise ValueError(f"Unsupported call_mode for ERC3: {job.call.call_mode}")

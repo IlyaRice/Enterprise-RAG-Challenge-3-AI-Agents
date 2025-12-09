@@ -25,6 +25,7 @@ from .prompts import (
     extraction_prompt_public, extraction_prompt_authenticated, 
     extraction_prompt_response, extraction_prompt_access_control,
     extraction_prompt_glossary, validator_prompt,
+    extraction_prompt_respond_public, extraction_prompt_respond_authenticated,
 )
 
 
@@ -33,6 +34,8 @@ CATEGORY_PROMPTS = {
     "authenticated": extraction_prompt_authenticated,
     "response": extraction_prompt_response,
     "access_control": extraction_prompt_access_control,
+    "respond_public": extraction_prompt_respond_public,
+    "respond_authenticated": extraction_prompt_respond_authenticated,
 }
 
 
@@ -253,6 +256,14 @@ def extract_all_rules(wiki_dir: str, max_attempts: int = 4) -> dict:
         else:
             print(f"  No rules extracted for {category}")
     
+    # Extract respond rules for public and authenticated
+    print(f"\n{'='*50}")
+    print(f"Category: respond rules (public + authenticated)")
+    print('='*50)
+    
+    respond_results = extract_all_respond_rules(wiki_dir, max_attempts)
+    result.update(respond_results)
+    
     # Extract response rules (uses different extraction function)
     print(f"\n{'='*50}")
     print(f"Category: response")
@@ -441,6 +452,167 @@ Address this feedback and try again."""
     
     print("    Max attempts reached, returning last result")
     return _format_access_control_rules(last_result) if last_result else ""
+
+
+def extract_respond_rules_for_category(wiki_dir: str, category: str, max_attempts: int = 4) -> str:
+    """
+    Extract respond-specific rules for a user category (public/authenticated).
+    
+    Includes already extracted rules as context to avoid duplication.
+    
+    Args:
+        wiki_dir: Path to wiki directory
+        category: Either 'public' or 'authenticated'
+        max_attempts: Maximum extraction attempts with validation
+    
+    Returns:
+        Formatted markdown string with respond rules
+    """
+    if category not in ["public", "authenticated"]:
+        raise ValueError(f"Category must be 'public' or 'authenticated', got: {category}")
+    
+    # Load wiki files
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
+    if not wiki_content:
+        return ""
+    
+    # Load existing extracted rules for this category
+    existing_rules_path = Path(wiki_dir) / "rules" / f"{category}.md"
+    existing_rules = ""
+    if existing_rules_path.exists():
+        existing_rules = existing_rules_path.read_text(encoding="utf-8")
+    
+    print(f"Extracting respond rules for {category} users...")
+    
+    # Build user message with existing rules as context
+    original_user_message = f"""<already_extracted_rules category="{category}">
+These are the general {category} rules we already have. DO NOT duplicate this content.
+Focus only on respond-specific rules that add NEW information.
+
+{existing_rules}
+</already_extracted_rules>
+
+<wiki_files>
+Extract respond-specific rules from the following wiki files:
+
+{wiki_content}
+</wiki_files>"""
+    
+    current_user_message = original_user_message
+    last_result = None
+    
+    prompt_key = f"respond_{category}"
+    extraction_prompt = CATEGORY_PROMPTS[prompt_key]
+    
+    for attempt in range(1, max_attempts + 1):
+        print(f"  Attempt {attempt}/{max_attempts}...")
+        
+        # Extract
+        w_result = call_llm(
+            schema=ExtractedRulesResponse,
+            system_prompt=extraction_prompt,
+            conversation=[{"role": "user", "content": current_user_message}],
+            reasoning_effort="high",
+        )
+        w_parsed = w_result["parsed"]
+        last_result = w_parsed.files
+        
+        total_chars = sum(len(f.content) for f in w_parsed.files)
+        print(f"    Extracted from {len(w_parsed.files)} files, {total_chars} chars")
+        
+        formatted_output = _format_result(w_parsed.files)
+        
+        # Validate
+        validator_message = f"""TASK:
+<system_prompt>
+{extraction_prompt}
+</system_prompt>
+
+<user_prompt>
+{original_user_message}
+</user_prompt>
+
+<result>
+{formatted_output}
+</result>
+
+Very carefully assess whether this result correctly fulfills the task."""
+
+        v_result = call_llm(
+            schema=ValidatorResponse,
+            system_prompt=validator_prompt,
+            conversation=[{"role": "user", "content": validator_message}],
+            reasoning_effort="high",
+        )
+        v_parsed = v_result["parsed"]
+        print(f"    Validator: {'PASS' if v_parsed.is_valid else 'REJECT'}")
+        
+        if v_parsed.is_valid:
+            return formatted_output
+        
+        # Prepare retry with feedback
+        if attempt < max_attempts:
+            print(f"    Rejection: {v_parsed.rejection_message}...")
+            current_user_message = f"""{original_user_message}
+
+RETRY: Previous attempt was rejected.
+
+Previous output:
+{formatted_output}
+
+Rejection feedback: {v_parsed.rejection_message}
+
+Address this feedback and try again."""
+    
+    print("    Max attempts reached, returning last result")
+    return _format_result(last_result) if last_result else ""
+
+
+def extract_all_respond_rules(wiki_dir: str, max_attempts: int = 4) -> dict:
+    """
+    Extract respond rules for both public and authenticated categories.
+    Saves to rules/respond_public.md and rules/respond_authenticated.md.
+    
+    Args:
+        wiki_dir: Path to wiki directory
+        max_attempts: Maximum extraction attempts with validation
+    
+    Returns:
+        dict with paths to saved files
+    """
+    wiki_path = Path(wiki_dir)
+    rules_dir = wiki_path / "rules"
+    rules_dir.mkdir(exist_ok=True)
+    
+    result = {}
+    
+    for category in ["public", "authenticated"]:
+        print(f"\n{'='*50}")
+        print(f"Category: respond_{category}")
+        print('='*50)
+        
+        content = extract_respond_rules_for_category(wiki_dir, category, max_attempts)
+        if content:
+            file_path = rules_dir / f"respond_{category}.md"
+            file_path.write_text(content, encoding="utf-8")
+            result[f"respond_{category}"] = str(file_path)
+            print(f"  Saved to {file_path}")
+        else:
+            print(f"  No respond rules extracted for {category}")
+    
+    return result
+
+
+def load_respond_rules_for_session(whoami: dict) -> str:
+    """Load pre-extracted respond rules based on session context (wiki_sha1, is_public)."""
+    if whoami.get("error") or not whoami.get("wiki_sha1"):
+        return ""
+    
+    wiki_dir = Path(__file__).parent / "wiki_data" / whoami["wiki_sha1"][:8]
+    category = "public" if whoami.get("is_public", True) else "authenticated"
+    rules_path = wiki_dir / "rules" / f"respond_{category}.md"
+    
+    return rules_path.read_text(encoding="utf-8") if rules_path.exists() else ""
 
 
 def load_rules_for_session(whoami: dict) -> str:

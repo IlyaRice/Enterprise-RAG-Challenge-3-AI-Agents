@@ -25,6 +25,7 @@ from .prompts import (
     system_prompt_erc3_respond_validator,
     Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
     Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
+    Req_LoadRespondInstructions,
 )
 
 # No meta-tools for ERC3 (single-agent architecture)

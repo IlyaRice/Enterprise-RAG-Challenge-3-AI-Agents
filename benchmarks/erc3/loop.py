@@ -381,7 +381,7 @@ def run_erc3_agent_loop(
         if function_to_execute is None:
             raise ValueError("ERC3 orchestrator produced a step without a function to execute.")
         
-        sdk_result = execute_erc3_tools(job, benchmark_client)
+        sdk_result = execute_erc3_tools(job, benchmark_client, task_ctx)
         
         trace.append(create_trace_event(
             node_id=node_id,
