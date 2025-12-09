@@ -23,7 +23,7 @@ from infrastructure import (
 )
 from .agent_config import VALIDATOR_REGISTRY, is_terminal_action
 from .tools import execute_erc3_tools
-from .prompts import ERC3StepValidatorResponse, ERC3RespondValidatorResponse, system_prompt_erc3_step_validator
+from .prompts import ERC3StepValidatorResponse, system_prompt_erc3_step_validator
 
 
 # ============================================================================
@@ -47,23 +47,6 @@ def run_erc3_step_validator(
     node_id = next_node_id(parent_node_id, sibling_count)
     validator_name = validator_config["name"]
     system_prompt = validator_config["system_prompt"]
-    
-    # Inject response formatting rules for respond validator
-    if validator_name == "ERC3RespondValidator":
-        from pathlib import Path
-        
-        # Get wiki_sha1 from task context
-        if task_ctx and task_ctx.whoami:
-            wiki_sha1 = task_ctx.whoami.get("wiki_sha1", "")[:8]
-            if wiki_sha1:
-                wiki_dir = str(Path(__file__).parent / "wiki_data" / wiki_sha1)
-                rules_path = Path(wiki_dir) / "rules" / "response_struct.md"
-                response_rules = rules_path.read_text(encoding="utf-8") if rules_path.exists() else "(no rules found)"
-                system_prompt = system_prompt.replace("{response_formatting_rules}", response_rules)
-            else:
-                system_prompt = system_prompt.replace("{response_formatting_rules}", "(wiki_sha1 not found in whoami)")
-        else:
-            system_prompt = system_prompt.replace("{response_formatting_rules}", "(task context or whoami unavailable)")
     
     separator = "#" * 15
     conversation_turns = []
@@ -107,42 +90,9 @@ PROPOSED NEXT STEP:
         reasoning = llm_result["reasoning"]
         llm_duration = llm_result["timing"]
         
-        # Build analysis string from structured fields
-        if validator_name == "ERC3RespondValidator":
-            analysis_parts = []
-            
-            # Links section
-            if parsed.link_candidates:
-                analysis_parts.append("=== LINK CANDIDATES ===")
-                for link in parsed.link_candidates:
-                    analysis_parts.append(f"\n{link.kind}/{link.id}")
-                    analysis_parts.append(f"  FOR: {link.arguments_for_including}")
-                    analysis_parts.append(f"  AGAINST: {link.arguments_against_including}")
-            
-            # Outcomes section
-            analysis_parts.append("\n\n=== OUTCOME ANALYSIS ===")
-            for outcome_name in ["ok_answer", "ok_not_found", "denied_security", 
-                                 "none_clarification_needed", "none_unsupported", "error_internal"]:
-                for_field = f"outcome_{outcome_name}_for"
-                against_field = f"outcome_{outcome_name}_against"
-                analysis_parts.append(f"\n{outcome_name}:")
-                analysis_parts.append(f"  FOR: {getattr(parsed, for_field)}")
-                analysis_parts.append(f"  AGAINST: {getattr(parsed, against_field)}")
-            
-            # Message section
-            analysis_parts.append("\n\n=== MESSAGE ANALYSIS ===")
-            analysis_parts.append(f"Should include: {parsed.message_analysis.what_should_be_included}")
-            analysis_parts.append(f"Should NOT include: {parsed.message_analysis.what_should_not_be_included}")
-            
-            analysis_str = "\n".join(analysis_parts)
-            
-            # Add analysis string to output for trace
-            output_for_trace = parsed.model_dump()
-            output_for_trace["analysis"] = analysis_str
-        else:
-            # step_validator uses simple analysis field
-            analysis_str = parsed.analysis
-            output_for_trace = parsed.model_dump()
+        # All validators use simple analysis field
+        analysis_str = parsed.analysis
+        output_for_trace = parsed.model_dump()
         
         trace.append(create_validator_event(
             node_id=node_id,

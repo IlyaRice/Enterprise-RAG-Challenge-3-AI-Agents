@@ -5,7 +5,6 @@ Coordinates context gathering, orchestrator execution, and evaluation.
 """
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List
 
@@ -18,7 +17,7 @@ from erc3.erc3.dtos import Req_ProvideAgentResponse, Req_ListWiki
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
 from .agent_config import AGENT_REGISTRY
-from .context_rules import run_context_builder, run_access_evaluator
+from .context_rules import run_context_builder
 from .loop import run_erc3_agent_loop
 from .rules import load_rules_for_session
 from .tools import (
@@ -59,7 +58,7 @@ def _get_wiki_sha1(whoami: dict, benchmark_client) -> str:
 
 def _load_company_info(wiki_sha1: str) -> dict:
     """
-    Load company info from glossary.json with fallback to defaults.
+    Load company info from wiki_meta.json with fallback to defaults.
     
     Args:
         wiki_sha1: 8-character SHA1 prefix
@@ -67,31 +66,30 @@ def _load_company_info(wiki_sha1: str) -> dict:
     Returns:
         Dict with company_name, company_locations, company_execs
     """
-    glossary_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "rules" / "glossary.json"
+    wiki_meta_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "wiki_meta.json"
     
-    # Default values if glossary doesn't exist
+    # Default values if wiki_meta doesn't exist
     defaults = {
-        "company_name": "ERC3",
+        "company_name": "Unknown",
         "company_locations": [],
         "company_execs": [],
     }
     
-    if not glossary_path.exists():
+    if not wiki_meta_path.exists():
         if config.VERBOSE:
-            print(f"  ℹ No glossary.json found, using defaults")
+            print(f"  ℹ No wiki_meta.json found, using defaults")
         return defaults
     
     try:
-        glossary = json.loads(glossary_path.read_text(encoding="utf-8"))
-        company = glossary.get("company", {})
+        wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
         return {
-            "company_name": company.get("name", defaults["company_name"]),
-            "company_locations": company.get("locations", defaults["company_locations"]),
-            "company_execs": company.get("executives", defaults["company_execs"]),
+            "company_name": wiki_meta.get("company_name", defaults["company_name"]),
+            "company_locations": wiki_meta.get("company_locations", defaults["company_locations"]),
+            "company_execs": wiki_meta.get("company_execs", defaults["company_execs"]),
         }
     except Exception as e:
         if config.VERBOSE:
-            print(f"  ⚠ Failed to load glossary.json: {e}, using defaults")
+            print(f"  ⚠ Failed to load wiki_meta.json: {e}, using defaults")
         return defaults
 
 
@@ -202,44 +200,25 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME, whoami=whoami)
     collected = collect_context_blocks(benchmark_client, task)
     
-    # Run context_builder and access_evaluator in parallel
+    # Run context_builder
     lf = get_client()
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_context = executor.submit(
-            run_context_builder,
+    # Run context builder
+    try:
+        selected_blocks = run_context_builder(
             task.task_text,
             collected,
             task_ctx,
             langfuse_trace_id=trace_id,
             langfuse_parent_observation_id=parent_obs_id,
         )
-        future_access = executor.submit(
-            run_access_evaluator,
-            task.task_text,
-            collected,
-            whoami,
-            task_ctx,
-            langfuse_trace_id=trace_id,
-            langfuse_parent_observation_id=parent_obs_id,
-        )
-        
-        # Get results with independent fallbacks
-        try:
-            selected_blocks = future_context.result()
-        except Exception as e:
-            print(f"✗ Context builder error: {e}, returning all blocks")
-            selected_blocks = list(collected.blocks.keys())
-        
-        try:
-            access_hints = future_access.result()
-        except Exception as e:
-            print(f"✗ Access evaluator error: {e}, skipping access hints")
-            access_hints = ""
+    except Exception as e:
+        print(f"✗ Context builder error: {e}, returning all blocks")
+        selected_blocks = list(collected.blocks.keys())
     
-    base_context = build_orchestrator_context(collected, selected_blocks, access_hints)
+    base_context = build_orchestrator_context(collected, selected_blocks)
     rules = load_rules_for_session(whoami)
     
     # Load company info and format system prompt
@@ -247,7 +226,7 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     if not wiki_sha1:
         raise ValueError("Unable to determine wiki_sha1 from /whoami or /wiki/list. Cannot proceed.")
     
-    # Load company info from glossary
+    # Load company info from wiki_meta
     company_info = _load_company_info(wiki_sha1)
     
     system_prompt = orchestrator_config["system_prompt"].format(
@@ -280,3 +259,4 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
         return _handle_timeout(benchmark_client, task, erc_client, trace, task.benchmark or "erc3")
     
     return _complete_and_format_result(task, erc_client, trace, agent_result, task.benchmark or "erc3")
+

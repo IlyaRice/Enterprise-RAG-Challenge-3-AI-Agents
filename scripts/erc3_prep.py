@@ -10,7 +10,6 @@ Usage:
     python scripts/erc3_prep.py export erc3-dev       # Export specs to docs
     python scripts/erc3_prep.py tag-files             # Tag all wiki files
     python scripts/erc3_prep.py extract-rules         # Extract rules from all wikis
-    python scripts/erc3_prep.py extract-employees     # Extract employee indexes from all wikis
     python scripts/erc3_prep.py all erc3-dev          # All: ingest + export
     python scripts/erc3_prep.py all                   # All benchmarks
 """
@@ -22,8 +21,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from benchmarks.erc3.wiki import ingest_wikis, export_specs_info, get_wiki_data_path, tag_wiki_files, create_employee_index
-from benchmarks.erc3.rules import extract_all_rules, extract_agent_glossary
+from benchmarks.erc3.wiki import ingest_wikis, export_specs_info, get_wiki_data_path, tag_wiki_files
+from benchmarks.erc3.rules import extract_all_rules
 
 
 # Known ERC3 benchmark variants
@@ -64,12 +63,8 @@ def cmd_all(args):
 
 
 def cmd_prep(args):
-    """Run all wiki enrichment (tag-files + extract-glossary + extract-employees + extract-rules)."""
+    """Run all wiki enrichment (tag-files + extract-rules)."""
     cmd_tag_files(args)
-    print("\n" + "="*60)
-    cmd_extract_glossary(args)
-    print("\n" + "="*60)
-    cmd_extract_employees(args)
     print("\n" + "="*60)
     cmd_extract_rules(args)
 
@@ -104,72 +99,6 @@ def cmd_extract_rules(args):
         print(f"\n  {sha_dir.name}:")
         try:
             extract_all_rules(str(sha_dir))
-        except Exception as e:
-            print(f"  ✗ Error: {e}")
-
-
-def cmd_extract_glossary(args):
-    """Extract glossary from all wikis."""
-    print(f"\n{'='*60}")
-    print(f"Extracting glossary from all wikis")
-    print('='*60)
-    
-    wiki_base = get_wiki_data_path()
-    
-    if not wiki_base.exists():
-        print("  No wiki data found. Run 'ingest' first.")
-        return
-    
-    for sha_dir in wiki_base.iterdir():
-        if not sha_dir.is_dir():
-            continue
-        
-        wiki_meta_path = sha_dir / "wiki_meta.json"
-        if not wiki_meta_path.exists():
-            continue
-        
-        glossary_path = sha_dir / "rules" / "glossary.json"
-        if glossary_path.exists() and not args.force:
-            print(f"  {sha_dir.name}: glossary.json exists, skipping (use --force to overwrite)")
-            continue
-        
-        print(f"\n  {sha_dir.name}:")
-        try:
-            result_path = extract_agent_glossary(str(sha_dir))
-            print(f"  ✓ Saved to {result_path}")
-        except Exception as e:
-            print(f"  ✗ Error: {e}")
-
-
-def cmd_extract_employees(args):
-    """Extract employee index from all wikis."""
-    print(f"\n{'='*60}")
-    print(f"Extracting employee indexes from all wikis")
-    print('='*60)
-    
-    wiki_base = get_wiki_data_path()
-    
-    if not wiki_base.exists():
-        print("  No wiki data found. Run 'ingest' first.")
-        return
-    
-    for sha_dir in wiki_base.iterdir():
-        if not sha_dir.is_dir():
-            continue
-        
-        wiki_meta_path = sha_dir / "wiki_meta.json"
-        if not wiki_meta_path.exists():
-            continue
-        
-        employee_index_path = sha_dir / "rules" / "employee_index.json"
-        if employee_index_path.exists() and not args.force:
-            print(f"  {sha_dir.name}: employee_index.json exists, skipping (use --force to overwrite)")
-            continue
-        
-        print(f"\n  {sha_dir.name}:")
-        try:
-            result_path = create_employee_index(sha_dir.name, force=args.force)
-            print(f"  ✓ Saved to {result_path}")
         except Exception as e:
             print(f"  ✗ Error: {e}")
 
@@ -220,7 +149,6 @@ Examples:
   python scripts/erc3_prep.py ingest erc3-dev       Download wikis for erc3-dev
   python scripts/erc3_prep.py tag-files             Tag all wiki files with has_rules
   python scripts/erc3_prep.py extract-rules         Extract rules from all wikis
-  python scripts/erc3_prep.py extract-employees     Extract employee indexes from all wikis
   python scripts/erc3_prep.py export erc3-test      Export specs for erc3-test
   python scripts/erc3_prep.py all erc3-dev          Both ingest + export for erc3-dev
   python scripts/erc3_prep.py all                   All benchmarks (erc3-dev, erc3-test, erc3, erc3-prod)
@@ -261,24 +189,8 @@ Examples:
     )
     extract_parser.set_defaults(func=cmd_extract_rules)
     
-    # Extract glossary command (works on all wikis - shared across benchmarks)
-    glossary_parser = subparsers.add_parser("extract-glossary", help="Extract glossary from wikis")
-    glossary_parser.add_argument(
-        "--force", "-f", action="store_true",
-        help="Overwrite existing glossary.json"
-    )
-    glossary_parser.set_defaults(func=cmd_extract_glossary)
-    
-    # Extract employees command (works on all wikis - shared across benchmarks)
-    employees_parser = subparsers.add_parser("extract-employees", help="Extract employee index from wikis")
-    employees_parser.add_argument(
-        "--force", "-f", action="store_true",
-        help="Overwrite existing employee_index.json"
-    )
-    employees_parser.set_defaults(func=cmd_extract_employees)
-    
     # Prep command (enrichment pipeline)
-    prep_parser = subparsers.add_parser("prep", help="Run all wiki enrichment (tag + glossary + employees + rules)")
+    prep_parser = subparsers.add_parser("prep", help="Run all wiki enrichment (tag + rules)")
     prep_parser.add_argument(
         "--force", "-f", action="store_true",
         help="Force re-processing even if files exist"

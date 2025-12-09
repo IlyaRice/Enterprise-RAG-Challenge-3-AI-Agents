@@ -961,7 +961,6 @@ def collect_context_blocks(client, task_info=None, workers: int = 4) -> Collecte
 def build_orchestrator_context(
     collected: CollectedContext,
     selected_blocks: List[str],
-    access_hints: str = "",
 ) -> str:
     """
     Build formatted context string for orchestrator prompt.
@@ -969,7 +968,6 @@ def build_orchestrator_context(
     Args:
         collected: CollectedContext from collect_context_blocks()
         selected_blocks: List of block names selected by context_builder
-        access_hints: Optional access guidance from access_evaluator
     
     Returns:
         Formatted context string ready for orchestrator prompt
@@ -982,10 +980,6 @@ def build_orchestrator_context(
     # Always include employee (if available)
     if collected.employee_content:
         parts.append(collected.employee_content)
-    
-    # Include access hints (after employee, before data blocks)
-    if access_hints:
-        parts.append(access_hints)
     
     # Add selected block contents only
     if selected_blocks:

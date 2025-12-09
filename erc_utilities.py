@@ -312,7 +312,7 @@ def _run_session(
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=26) as executor:
         futures = {
             executor.submit(
                 run_agent, erc, task, benchmark,

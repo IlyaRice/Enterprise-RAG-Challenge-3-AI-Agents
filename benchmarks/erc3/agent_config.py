@@ -19,10 +19,8 @@ from erc3.erc3.dtos import (
 from .prompts import (
     NextStepERC3Orchestrator,
     ERC3StepValidatorResponse,
-    ERC3RespondValidatorResponse,
     system_prompt_erc3_orchestrator,
     system_prompt_erc3_step_validator,
-    system_prompt_erc3_respond_validator,
     Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
     Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
     Req_LoadRespondInstructions,
@@ -57,14 +55,6 @@ NON_RESPOND_TOOLS = (
 
 # Step validator registry (pre-execution planning guardrail)
 VALIDATOR_REGISTRY = {
-    "respond_validator": {
-        "name": "ERC3RespondValidator",
-        "system_prompt": system_prompt_erc3_respond_validator,
-        "schema": ERC3RespondValidatorResponse,
-        "triggers_on_tools": (),
-        "applies_to_agents": ("ERC3Orchestrator",),
-        "max_attempts": 2,
-    },
     "step_validator": {
         "name": "ERC3StepValidator",
         "system_prompt": system_prompt_erc3_step_validator,
