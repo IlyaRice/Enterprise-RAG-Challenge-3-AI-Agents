@@ -22,7 +22,7 @@ def run_agent(erc_client: ERC3, task: TaskInfo, benchmark: str) -> dict:
     Args:
         erc_client: ERC3 client for API access
         task: Task to run
-        benchmark: Benchmark name ("store", "erc3", "erc3-dev", "erc3-test")
+        benchmark: Benchmark name ("store", "erc3", "erc3-dev", "erc3-test", "erc3-prod")
     
     Returns:
         Result dict including trace of all events.

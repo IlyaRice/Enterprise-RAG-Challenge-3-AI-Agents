@@ -40,7 +40,7 @@ AGENT_REGISTRY = {
         "name": "ERC3Orchestrator",
         "system_prompt": system_prompt_erc3_orchestrator,
         "schema": NextStepERC3Orchestrator,
-        "max_steps": 20,
+        "max_steps": 30,
         "tool_type": "sdk",
     },
 }
@@ -52,7 +52,7 @@ NON_RESPOND_TOOLS = (
     Req_ListProjects, Req_SearchProjects, Req_GetProject, Req_UpdateProjectTeam, Req_UpdateProjectStatus,
     Req_LoadWiki, Req_SearchWiki, Req_UpdateWiki,
     Req_LogTimeEntry, Req_UpdateTimeEntry, Req_GetTimeEntry, Req_SearchTimeEntries,
-    Req_TimeSummaryByProject, Req_TimeSummaryByEmployee,
+    Req_TimeSummaryByProject, Req_TimeSummaryByEmployee, Req_ProvideAgentResponse,
 )
 
 # Step validator registry (pre-execution planning guardrail)
@@ -61,7 +61,7 @@ VALIDATOR_REGISTRY = {
         "name": "ERC3RespondValidator",
         "system_prompt": system_prompt_erc3_respond_validator,
         "schema": ERC3RespondValidatorResponse,
-        "triggers_on_tools": (Req_ProvideAgentResponse,),
+        "triggers_on_tools": (),
         "applies_to_agents": ("ERC3Orchestrator",),
         "max_attempts": 2,
     },
@@ -69,7 +69,7 @@ VALIDATOR_REGISTRY = {
         "name": "ERC3StepValidator",
         "system_prompt": system_prompt_erc3_step_validator,
         "schema": ERC3StepValidatorResponse,
-        "triggers_on_tools": NON_RESPOND_TOOLS,
+        "triggers_on_tools": (Req_ProvideAgentResponse),
         "applies_to_agents": ("ERC3Orchestrator",),
         "max_attempts": 2,
     },

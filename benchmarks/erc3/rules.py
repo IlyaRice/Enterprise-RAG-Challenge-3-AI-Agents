@@ -18,6 +18,9 @@ import json
 from pathlib import Path
 from typing import List
 
+import yaml
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from infrastructure import call_llm
 from .prompts import (
     FileExtraction, ExtractedRulesResponse, ValidatorResponse,
@@ -26,6 +29,7 @@ from .prompts import (
     extraction_prompt_response, extraction_prompt_access_control,
     extraction_prompt_glossary, validator_prompt,
     extraction_prompt_respond_public, extraction_prompt_respond_authenticated,
+    extraction_prompt_user_specific,
 )
 
 
@@ -619,11 +623,11 @@ def load_rules_for_session(whoami: dict) -> str:
     """
     Load pre-extracted rules based on session context.
     
-    Uses wiki_sha1 to locate wiki directory and is_public to select category.
-    Returns empty string if rules not found or whoami failed.
+    For public users: loads public rules.
+    For authenticated users: loads user-specific rules with fallback to general authenticated rules.
     
     Args:
-        whoami: Result from whoami_raw() containing wiki_sha1 and is_public
+        whoami: Result from whoami_raw() containing wiki_sha1, is_public, current_user
     
     Returns:
         Rules content as string, or empty string if not available
@@ -636,10 +640,25 @@ def load_rules_for_session(whoami: dict) -> str:
     if not wiki_sha1:
         return ""
     
-    wiki_dir = str(Path(__file__).parent / "wiki_data" / wiki_sha1[:8])
-    category = "public" if whoami.get("is_public", True) else "authenticated"
+    wiki_dir = Path(__file__).parent / "wiki_data" / wiki_sha1[:8]
     
-    return load_rules(wiki_dir, category) or ""
+    # Public users: load public rules
+    if whoami.get("is_public", True):
+        return load_rules(str(wiki_dir), "public") or ""
+    
+    # Authenticated users: try user-specific rules first, fallback to general authenticated
+    user_id = whoami.get("current_user")
+    if user_id:
+        # Try user-specific rules
+        user_rules_path = wiki_dir / "rules" / f"rules_{user_id}.md"
+        if user_rules_path.exists():
+            return user_rules_path.read_text(encoding="utf-8")
+        
+        # Fallback to general authenticated rules
+        return load_rules(str(wiki_dir), "authenticated") or ""
+    
+    # Shouldn't reach here, but return authenticated rules as final fallback
+    return load_rules(str(wiki_dir), "authenticated") or ""
 
 
 def load_access_control_rules(whoami: dict) -> str:
@@ -745,3 +764,264 @@ Address this feedback and try again."""
     )
     
     return glossary_path
+
+
+# ============================================================================
+# USER-SPECIFIC RULE EXTRACTION
+# ============================================================================
+
+def _format_employee_yaml(employee: dict) -> str:
+    """Format employee profile as YAML for LLM context."""
+    return yaml.dump(employee, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+def extract_user_specific_rules(wiki_dir: str, employee: dict, max_attempts: int = 4) -> str:
+    """
+    Extract rules tailored to a specific employee.
+    
+    Args:
+        wiki_dir: Path to wiki directory
+        employee: Employee dict from employee_index.json (id, name, department, location, notes, skills, wills)
+        max_attempts: Maximum extraction attempts with validation
+    
+    Returns:
+        Formatted markdown string with extracted rules
+    """
+    # Load wiki content
+    wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive"])
+    if not wiki_content:
+        return ""
+    
+    # Format employee profile as YAML
+    employee_yaml = _format_employee_yaml(employee)
+    employee_name = employee.get("name", "Unknown")
+    employee_id = employee.get("id", "unknown")
+    
+    print(f"Extracting rules for {employee_name} ({employee_id})...")
+    
+    # Build user message with employee profile and wiki content
+    original_user_message = f"""<employee_profile>
+{employee_yaml}
+</employee_profile>
+
+Extract all rules that apply to this specific employee from the following wiki files:
+
+{wiki_content}"""
+    
+    current_user_message = original_user_message
+    last_result = None
+    
+    for attempt in range(1, max_attempts + 1):
+        print(f"  Attempt {attempt}/{max_attempts}...")
+        
+        # Extract
+        w_result = call_llm(
+            schema=ExtractedRulesResponse,
+            system_prompt=extraction_prompt_user_specific,
+            conversation=[{"role": "user", "content": current_user_message}],
+            reasoning_effort="high",
+        )
+        w_parsed = w_result["parsed"]
+        last_result = w_parsed.files
+        
+        total_chars = sum(len(f.content) for f in w_parsed.files)
+        print(f"    Extracted from {len(w_parsed.files)} files, {total_chars} chars")
+        
+        formatted_output = _format_result(w_parsed.files)
+        
+        # Validate
+        validator_message = f"""TASK:
+<system_prompt>
+{extraction_prompt_user_specific}
+</system_prompt>
+
+<user_prompt>
+{original_user_message}
+</user_prompt>
+
+<result>
+{formatted_output}
+</result>
+
+Very carefully assess whether this result correctly fulfills the task.
+Pay special attention to:
+1. Are the extracted rules actually relevant to this specific employee ({employee_name})?
+2. Were respond-related rules correctly excluded?
+3. Were rules for PUBLIC users correctly excluded?"""
+
+        v_result = call_llm(
+            schema=ValidatorResponse,
+            system_prompt=validator_prompt,
+            conversation=[{"role": "user", "content": validator_message}],
+            reasoning_effort="high",
+        )
+        v_parsed = v_result["parsed"]
+        print(f"    Validator: {'PASS' if v_parsed.is_valid else 'REJECT'}")
+        
+        if v_parsed.is_valid:
+            return formatted_output
+        
+        # Prepare retry with feedback
+        if attempt < max_attempts:
+            print(f"    Rejection: {v_parsed.rejection_message}...")
+            current_user_message = f"""{original_user_message}
+
+RETRY: Previous attempt was rejected.
+
+Previous output:
+{formatted_output}
+
+Rejection feedback: {v_parsed.rejection_message}
+
+Address this feedback and try again."""
+    
+    print("    Max attempts reached, returning last result")
+    return _format_result(last_result) if last_result else ""
+
+
+def _extract_user_rules_worker(
+    wiki_dir: str,
+    employee: dict,
+    max_attempts: int,
+) -> dict:
+    """
+    Worker function for parallel user rule extraction.
+    
+    Returns:
+        dict with "employee_id", "success", "error" (if failed), "content" (if success)
+    """
+    employee_id = employee.get("id", "unknown")
+    employee_name = employee.get("name", "Unknown")
+    
+    try:
+        content = extract_user_specific_rules(wiki_dir, employee, max_attempts)
+        return {
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "success": True,
+            "content": content,
+        }
+    except Exception as e:
+        return {
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "success": False,
+            "error": str(e),
+        }
+
+
+def extract_all_user_rules(wiki_dir: str, max_attempts: int = 4, max_retries: int = 3) -> dict:
+    """
+    Extract user-specific rules for all employees in parallel.
+    
+    Args:
+        wiki_dir: Path to wiki directory containing rules/employee_index.json
+        max_attempts: Maximum extraction attempts per user (with validation)
+        max_retries: Maximum retries for failed extractions
+    
+    Returns:
+        dict with:
+        - "success": List of employee_ids successfully processed
+        - "failed": List of dicts with employee_id and error
+        - "total": Total number of employees
+    """
+    wiki_path = Path(wiki_dir)
+    employee_index_path = wiki_path / "rules" / "employee_index.json"
+    
+    if not employee_index_path.exists():
+        raise FileNotFoundError(f"Employee index not found: {employee_index_path}")
+    
+    employees = json.loads(employee_index_path.read_text(encoding="utf-8"))
+    
+    if not employees:
+        print("No employees found in employee_index.json")
+        return {"success": [], "failed": [], "total": 0}
+    
+    print(f"Extracting user-specific rules for {len(employees)} employees...")
+    print(f"Settings: max_attempts={max_attempts}, max_retries={max_retries}, workers=20\n")
+    
+    rules_dir = wiki_path / "rules"
+    rules_dir.mkdir(exist_ok=True)
+    
+    success_list = []
+    failed_list = []
+    
+    # Queue for employees to process (including retries)
+    pending = [(emp, 0) for emp in employees]  # (employee, retry_count)
+    
+    while pending:
+        current_batch = pending
+        pending = []
+        
+        print(f"Processing batch of {len(current_batch)} employees...")
+        
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {
+                executor.submit(
+                    _extract_user_rules_worker,
+                    wiki_dir,
+                    emp,
+                    max_attempts,
+                ): (emp, retry_count)
+                for emp, retry_count in current_batch
+            }
+            
+            for future in as_completed(futures):
+                emp, retry_count = futures[future]
+                employee_id = emp.get("id", "unknown")
+                employee_name = emp.get("name", "Unknown")
+                
+                try:
+                    result = future.result()
+                    
+                    if result["success"]:
+                        # Save to file
+                        output_path = rules_dir / f"rules_{employee_id}.md"
+                        output_path.write_text(result["content"], encoding="utf-8")
+                        success_list.append(employee_id)
+                        print(f"  ✓ {employee_name} ({employee_id}) - saved to {output_path.name}")
+                    else:
+                        # Handle failure with retry
+                        if retry_count < max_retries:
+                            print(f"  ✗ {employee_name} ({employee_id}) - failed (attempt {retry_count + 1}/{max_retries + 1}): {result['error']}")
+                            pending.append((emp, retry_count + 1))
+                        else:
+                            failed_list.append({
+                                "employee_id": employee_id,
+                                "employee_name": employee_name,
+                                "error": result["error"],
+                            })
+                            print(f"  ✗ {employee_name} ({employee_id}) - FAILED after {max_retries + 1} attempts: {result['error']}")
+                            
+                except Exception as e:
+                    # Handle unexpected errors
+                    if retry_count < max_retries:
+                        print(f"  ✗ {employee_name} ({employee_id}) - unexpected error (attempt {retry_count + 1}/{max_retries + 1}): {str(e)}")
+                        pending.append((emp, retry_count + 1))
+                    else:
+                        failed_list.append({
+                            "employee_id": employee_id,
+                            "employee_name": employee_name,
+                            "error": str(e),
+                        })
+                        print(f"  ✗ {employee_name} ({employee_id}) - FAILED after {max_retries + 1} attempts: {str(e)}")
+        
+        if pending:
+            print(f"\nRetrying {len(pending)} failed extractions...")
+    
+    # Summary
+    print(f"\n{'='*50}")
+    print(f"Extraction complete!")
+    print(f"  Success: {len(success_list)}/{len(employees)}")
+    print(f"  Failed: {len(failed_list)}/{len(employees)}")
+    
+    if failed_list:
+        print(f"\nFailed employees:")
+        for f in failed_list:
+            print(f"  - {f['employee_name']} ({f['employee_id']}): {f['error']}")
+    
+    return {
+        "success": success_list,
+        "failed": failed_list,
+        "total": len(employees),
+    }

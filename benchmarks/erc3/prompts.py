@@ -432,6 +432,36 @@ For intertwined content: surgically extract only what's relevant, preserving ori
 Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
 """
 
+extraction_prompt_user_specific = """
+Your task is to retrieve a subset of rules for a corporate AI chatbot agent that works for a SPECIFIC employee.
+The employee's full profile is provided in the user message.
+However, at this stage, any rules concerning PUBLIC users (guests, anonymous visitors, unauthenticated users) are completely irrelevant.
+Also completely irrelevant are rules concerning response formatting using the /respond tool.
+Extract all rules that apply to this specific employee, except for rules about response formatting.
+
+Specifically, omit:
+- Any rules concerning determining permissions and access rights for PUBLIC users.
+- Any information concerning PUBLIC users.
+
+- Any rules about how to choose the outcome field for the respond (ok_answer, ok_not_found, denied_security, etc.)
+- Any rules about attaching links to responses in the respond
+- Any rules about formulating response messages in the respond
+- Any other guidance on using the /respond tool
+
+Keep everything else:
+- All rules about what actions this employee can perform
+- All rules about what information this employee can access
+- All permission and prohibition rules relevant to this employee based on their department, location, role, or seniority
+- All data access restrictions that apply to this employee
+- Any rules that mention this employee by name
+- All other AI agent behavioral rules relevant to this employee
+- ALL general rules for authenticated users that cannot be clearly excluded based on the employee's profile should be included to ensure complete coverage.
+
+For intertwined content: surgically extract only what's relevant, preserving original phrasing with minimal adaptation.
+
+Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
+"""
+
 extraction_prompt_response = """
 <role>
 You are a Systems Architect extracting rules for the /respond tool in a categorized structure.
@@ -533,59 +563,49 @@ If it's about internal tool usage (not /respond output) → EXCLUDE
 # </output_format>
 
 extraction_prompt_respond_public = """
-Your task is to retrieve respond rules for PUBLIC users (guests, anonymous visitors, unauthenticated users) from a corporate AI chatbot agent. 
+Your task is to extract ALL respond/response rules for PUBLIC users from wiki files.
 
-CONTEXT: You will be provided with:
-1. ALREADY EXTRACTED PUBLIC RULES - these are the general rules we already have for public users
-2. WIKI FILES - the source material containing all rules
+CONTEXT: You will see ALREADY EXTRACTED PUBLIC RULES for reference only. Ignore them when deciding what to extract.
 
-Your job is to extract ONLY the respond-related rules that are NOT already covered in the existing public rules.
-
-Specifically, extract rules about:
-- When to use each outcome field for the /respond tool (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
-- How to attach links to responses for PUBLIC users
+Extract ALL rules about /respond for PUBLIC users, including:
+- When to use each outcome (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
+- How to attach links (AgentLink) for PUBLIC users
 - How to formulate response messages for PUBLIC users
-- Any other guidance on using the /respond tool for PUBLIC users
+- Any Req_ProvideAgentResponse guidance for PUBLIC mode
+
+DUPLICATION IS OK: Extract respond rules even if similar content appears in the already extracted rules. We want a complete standalone respond ruleset.
+
+NEVER RETURN EMPTY: You must extract rules. The wiki files contain Response Contract section - extract it.
 
 DO NOT extract:
-- General access control rules (already in existing rules)
-- General permission rules (already in existing rules)
+- General access control/permission rules unrelated to /respond output
 - Rules about internal tool usage (search, update, etc.)
-- Rules that apply to AUTHENTICATED users only
+- Rules that apply only to AUTHENTICATED users
 
-IMPORTANT: Review the ALREADY EXTRACTED PUBLIC RULES carefully. Do not duplicate content that's already there. Extract only respond-specific rules that add new information.
-
-For intertwined content: surgically extract only what's relevant to respond tool usage for PUBLIC users, preserving original phrasing with minimal adaptation.
-
-Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
+Return rules preserving original phrasing, maintaining formatting and headers.
 """
 
 extraction_prompt_respond_authenticated = """
-Your task is to retrieve respond rules for AUTHENTICATED users (logged-in employees, staff members) from a corporate AI chatbot agent.
+Your task is to extract ALL respond/response rules for AUTHENTICATED users from wiki files.
 
-CONTEXT: You will be provided with:
-1. ALREADY EXTRACTED AUTHENTICATED RULES - these are the general rules we already have for authenticated users
-2. WIKI FILES - the source material containing all rules
+CONTEXT: You will see ALREADY EXTRACTED AUTHENTICATED RULES for reference only. Ignore them when deciding what to extract.
 
-Your job is to extract ONLY the respond-related rules that are NOT already covered in the existing authenticated rules.
-
-Specifically, extract rules about:
-- When to use each outcome field for the /respond tool (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
-- How to attach links to responses for AUTHENTICATED users
+Extract ALL rules about /respond for AUTHENTICATED users, including:
+- When to use each outcome (ok_answer, ok_not_found, denied_security, none_clarification_needed, none_unsupported, error_internal)
+- How to attach links (AgentLink) for AUTHENTICATED users
 - How to formulate response messages for AUTHENTICATED users
-- Any other guidance on using the /respond tool for AUTHENTICATED users
+- Any Req_ProvideAgentResponse guidance for AUTHENTICATED/internal mode
+
+DUPLICATION IS OK: Extract respond rules even if similar content appears in the already extracted rules. We want a complete standalone respond ruleset.
+
+NEVER RETURN EMPTY: You must extract rules. The wiki files contain Response Contract section - extract it.
 
 DO NOT extract:
-- General access control rules (already in existing rules)
-- General permission rules (already in existing rules)
+- General access control/permission rules unrelated to /respond output
 - Rules about internal tool usage (search, update, etc.)
-- Rules that apply to PUBLIC users only
+- Rules that apply only to PUBLIC users
 
-IMPORTANT: Review the ALREADY EXTRACTED AUTHENTICATED RULES carefully. Do not duplicate content that's already there. Extract only respond-specific rules that add new information.
-
-For intertwined content: surgically extract only what's relevant to respond tool usage for AUTHENTICATED users, preserving original phrasing with minimal adaptation.
-
-Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
+Return rules preserving original phrasing, maintaining formatting and headers.
 """
 
 extraction_prompt_glossary = """

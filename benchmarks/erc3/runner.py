@@ -13,7 +13,7 @@ from langfuse import get_client, observe
 
 import config
 from erc3 import ERC3, TaskInfo
-from erc3.erc3.dtos import Req_ProvideAgentResponse
+from erc3.erc3.dtos import Req_ProvideAgentResponse, Req_ListWiki
 
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
@@ -26,6 +26,73 @@ from .tools import (
     build_orchestrator_context,
     whoami_raw,
 )
+
+
+def _get_wiki_sha1(whoami: dict, benchmark_client) -> str:
+    """
+    Get wiki SHA1 with fallback to /wiki/list if whoami fails.
+    
+    Args:
+        whoami: Result from whoami_raw()
+        benchmark_client: SDK client for API calls
+    
+    Returns:
+        8-character SHA1 prefix, or empty string on total failure
+    """
+    # Try to get from whoami first
+    wiki_sha1 = whoami.get("wiki_sha1", "")
+    
+    # If whoami returned empty (system error simulation), fallback to /wiki/list
+    if not wiki_sha1:
+        try:
+            wiki_list_response = benchmark_client.dispatch(Req_ListWiki())
+            wiki_sha1 = wiki_list_response.sha1
+            if config.VERBOSE:
+                print(f"  ℹ Recovered wiki_sha1 from /wiki/list: {wiki_sha1[:8]}")
+        except Exception as e:
+            if config.VERBOSE:
+                print(f"  ⚠ Failed to get wiki_sha1 from /wiki/list: {e}")
+            return ""
+    
+    return wiki_sha1[:8] if wiki_sha1 else ""
+
+
+def _load_company_info(wiki_sha1: str) -> dict:
+    """
+    Load company info from glossary.json with fallback to defaults.
+    
+    Args:
+        wiki_sha1: 8-character SHA1 prefix
+    
+    Returns:
+        Dict with company_name, company_locations, company_execs
+    """
+    glossary_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "rules" / "glossary.json"
+    
+    # Default values if glossary doesn't exist
+    defaults = {
+        "company_name": "ERC3",
+        "company_locations": [],
+        "company_execs": [],
+    }
+    
+    if not glossary_path.exists():
+        if config.VERBOSE:
+            print(f"  ℹ No glossary.json found, using defaults")
+        return defaults
+    
+    try:
+        glossary = json.loads(glossary_path.read_text(encoding="utf-8"))
+        company = glossary.get("company", {})
+        return {
+            "company_name": company.get("name", defaults["company_name"]),
+            "company_locations": company.get("locations", defaults["company_locations"]),
+            "company_execs": company.get("executives", defaults["company_execs"]),
+        }
+    except Exception as e:
+        if config.VERBOSE:
+            print(f"  ⚠ Failed to load glossary.json: {e}, using defaults")
+        return defaults
 
 
 def _build_full_erc3_context(
@@ -55,7 +122,7 @@ def _complete_and_format_result(task: TaskInfo, erc_client: ERC3, trace: List[di
     for attempt in range(max_retries):
         try:
             completion = erc_client.complete_task(task)
-            score = completion.eval.score if completion.eval else None
+            score = completion.eval.score if completion.eval else 0
             eval_logs = completion.eval.logs if completion.eval else None
             break
         except Exception as e:
@@ -69,7 +136,7 @@ def _complete_and_format_result(task: TaskInfo, erc_client: ERC3, trace: List[di
                 eval_logs = f"Completion failed after {max_retries} attempts: {str(e)}"
     
     lf = get_client()
-    lf.score_current_span(name="score", value=score, data_type="NUMERIC", comment=eval_logs)
+    lf.score_current_span(name="score", value=score or 0, data_type="NUMERIC", comment=eval_logs)
     
     return {
         "task_id": task.task_id,
@@ -176,18 +243,26 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     rules = load_rules_for_session(whoami)
     
     # Load company info and format system prompt
-    wiki_sha1 = whoami.get("wiki_sha1", "")[:8]
-    wiki_meta_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "wiki_meta.json"
-    wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
+    wiki_sha1 = _get_wiki_sha1(whoami, benchmark_client)
+    if not wiki_sha1:
+        raise ValueError("Unable to determine wiki_sha1 from /whoami or /wiki/list. Cannot proceed.")
+    
+    # Load company info from glossary
+    company_info = _load_company_info(wiki_sha1)
     
     system_prompt = orchestrator_config["system_prompt"].format(
-        company_name=wiki_meta.get("company_name", "ERC3"),
-        company_locations=", ".join(wiki_meta.get("company_locations", [])),
-        company_execs=", ".join(wiki_meta.get("company_execs", []))
+        company_name=company_info["company_name"],
+        company_locations=", ".join(company_info["company_locations"]),
+        company_execs=", ".join(company_info["company_execs"])
     )
     
     if rules and rules.strip():
-        system_prompt = f"{system_prompt}\n\n<rules>\n{rules}\n</rules>"
+        # Add tailored_for attribute if authenticated user
+        user_id = whoami.get("current_user")
+        if user_id and not whoami.get("is_public"):
+            system_prompt = f'{system_prompt}\n\n<rules tailored_for="{user_id}">\n{rules}\n</rules>'
+        else:
+            system_prompt = f"{system_prompt}\n\n<rules>\n{rules}\n</rules>"
     orchestrator_config["system_prompt"] = system_prompt
     
     full_context = _build_full_erc3_context(task.task_text, base_context, selected_blocks)

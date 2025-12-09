@@ -129,7 +129,7 @@ def _repeat_task(benchmark: str, task_index: int, num_times: int) -> List[dict]:
     lf = get_client()
     lf.score_current_span(
         name="avg-score",
-        value=total_score/len(results) if results else 0,
+        value=(total_score/len(results) if results else 0) or 0,
         data_type="NUMERIC",
         comment=f"{total_score}/{len(results)} tasks"
     )
@@ -312,7 +312,7 @@ def _run_session(
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    with ThreadPoolExecutor(max_workers=len(status.tasks)) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {
             executor.submit(
                 run_agent, erc, task, benchmark,
@@ -350,7 +350,7 @@ def _run_session(
     print(f"{'#'*30}\nSession: {total_score}/{num_scored}\n{'#'*30}")
     lf.score_current_span(
         name="session-score",
-        value=avg_score,
+        value=avg_score or 0,
         data_type="NUMERIC",
         comment=f"{total_score}/{num_scored}"
     )
@@ -406,6 +406,8 @@ def create_and_run_session(
         name=name,
         architecture=architecture,
         flags=["compete_accuracy", "compete_budget", "compete_speed", "compete_local"]
+        # flags=["compete_local"]
+
     )
     print(f"Created session {session.session_id} with {session.task_count} tasks")
     return _run_session(benchmark, session.session_id, workspace, name, architecture, export_path)

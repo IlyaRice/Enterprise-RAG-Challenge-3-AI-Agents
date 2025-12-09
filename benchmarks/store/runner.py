@@ -60,11 +60,11 @@ def _handle_task_completion(
     # Complete task and get evaluation
     completion = erc_client.complete_task(task)
     
-    score = completion.eval.score if completion.eval else None
+    score = completion.eval.score if completion.eval else 0
     eval_logs = completion.eval.logs if completion.eval else None
     
     lf = get_client()
-    lf.score_current_span(name="score", value=score, data_type="NUMERIC", comment=eval_logs)
+    lf.score_current_span(name="score", value=score or 0, data_type="NUMERIC", comment=eval_logs)
 
     if config.VERBOSE:
         print(f"Score: {score}")

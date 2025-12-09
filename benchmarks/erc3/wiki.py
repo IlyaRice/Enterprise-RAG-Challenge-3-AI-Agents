@@ -21,10 +21,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import config
 from erc3 import ERC3, TaskInfo
-from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI
+from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI, Req_ListEmployees, Req_GetEmployee
 from langfuse import observe
 from infrastructure import call_llm
 from .prompts import TaggingResponse, ValidatorResponse, tagging_prompt, validator_prompt
+from .tools import _paginate
 import config
 
 # Path to wiki data directory (relative to this file)
@@ -298,6 +299,199 @@ def export_specs_info(benchmark_name: str) -> Path:
     
     print(f"✓ Specs exported to {output_path}")
     return output_path
+
+
+# ============================================================================
+# EMPLOYEE INDEX COLLECTION
+# ============================================================================
+
+def create_employee_index(wiki_sha1_prefix: str, force: bool = False) -> Path:
+    """
+    Collect all employees for a wiki and save to rules/employee_index.json.
+    
+    Tries multiple tasks if the employee list is empty (broken task).
+    
+    Args:
+        wiki_sha1_prefix: 8-char SHA1 prefix of the wiki
+        force: If True, overwrite existing employee_index.json
+    
+    Returns:
+        Path to the created employee_index.json file
+    
+    Raises:
+        ValueError: If no valid tasks found or all tasks return empty employee lists
+        FileNotFoundError: If wiki directory doesn't exist
+    """
+    # Get wiki directory
+    wiki_dir = get_wiki_data_path(wiki_sha1_prefix)
+    if not wiki_dir.exists():
+        raise FileNotFoundError(f"Wiki directory not found: {wiki_dir}")
+    
+    # Ensure rules directory exists
+    rules_dir = wiki_dir / "rules"
+    rules_dir.mkdir(exist_ok=True)
+    output_path = rules_dir / "employee_index.json"
+    
+    # Check if already exists
+    if output_path.exists() and not force:
+        print(f"  Employee index already exists at {output_path} (use force=True to overwrite)")
+        return output_path
+    
+    # Load wiki_meta to get tasks
+    wiki_meta_path = wiki_dir / "wiki_meta.json"
+    wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
+    
+    # Get all tasks from all benchmarks
+    all_tasks = []
+    for benchmark_name, tasks in wiki_meta.get("tasks", {}).items():
+        for task in tasks:
+            all_tasks.append({
+                "task": task,
+                "benchmark": benchmark_name
+            })
+    
+    if not all_tasks:
+        raise ValueError(f"No tasks found in wiki_meta for {wiki_sha1_prefix}")
+    
+    print(f"Collecting employee index for wiki {wiki_sha1_prefix}...")
+    print(f"  Found {len(all_tasks)} task(s) to try")
+    
+    # Try each task until we get a non-empty employee list
+    core = ERC3(key=config.ERC3_API_KEY)
+    employees = None
+    
+    for idx, task_data in enumerate(all_tasks):
+        task = task_data["task"]
+        benchmark_name = task_data["benchmark"]
+        
+        print(f"  Trying task {idx + 1}/{len(all_tasks)}: {task['id']} from {benchmark_name}...")
+        
+        try:
+            # Create task and client
+            resp = core.start_new_task(benchmark=benchmark_name, spec_id=task["id"])
+            detail = core.task_detail(resp.task_id)
+            
+            task_info = TaskInfo(
+                spec_id=task["id"],
+                task_id=resp.task_id,
+                num=task["index"],
+                task_text=detail.text,
+                status=resp.status,
+                benchmark=benchmark_name,
+                score=0.0
+            )
+            
+            client = core.get_erc_dev_client(task_info)
+            
+            # Step 1: Get all employee IDs using pagination (EmployeeBrief only has basic fields)
+            result = _paginate(client, Req_ListEmployees, "employees")
+            
+            if not result.get("complete"):
+                print(f"    ⚠️ Warning: Employee list incomplete: {result.get('errors')}")
+            
+            employee_briefs = result.get("items", [])
+            
+            # Check if empty (broken task)
+            if not employee_briefs:
+                print(f"    ✗ Task returned empty employee list (broken task), trying next...")
+                continue
+            
+            print(f"    ✓ Found {len(employee_briefs)} employees, fetching full details...")
+            
+            # Step 2: Get full details for each employee (EmployeeView has notes, skills, wills)
+            employees = []
+            for emp_brief in employee_briefs:
+                emp_id = emp_brief.get("id")
+                if not emp_id:
+                    continue
+                try:
+                    resp = client.dispatch(Req_GetEmployee(id=emp_id))
+                    if resp.employee:
+                        employees.append(resp.employee.model_dump())
+                except Exception as e:
+                    print(f"    ⚠️ Failed to get employee {emp_id}: {e}")
+            
+            print(f"    ✓ Got full details for {len(employees)} employees")
+            break
+            
+        except Exception as e:
+            print(f"    ✗ Error with task: {str(e)}, trying next...")
+            continue
+    
+    # Check if we got any employees
+    if not employees:
+        raise ValueError(f"All tasks returned empty employee lists for wiki {wiki_sha1_prefix}. This may indicate a systemic issue.")
+    
+    # Extract only the fields we want
+    employee_index = []
+    for emp in employees:
+        skills = emp.get("skills", [])
+        wills = emp.get("wills", [])
+        
+        employee_index.append({
+            "id": emp.get("id"),
+            "name": emp.get("name"),
+            "department": emp.get("department"),
+            "location": emp.get("location"),
+            "notes": emp.get("notes", ""),
+            "skills": [{"name": s["name"], "level": s["level"]} for s in skills],
+            "wills": [{"name": w["name"], "level": w["level"]} for w in wills],
+        })
+    
+    # Save to rules/employee_index.json
+    output_path.write_text(
+        json.dumps(employee_index, indent=2, ensure_ascii=False),
+        encoding="utf-8"
+    )
+    
+    print(f"  ✓ Employee index saved to {output_path}")
+    return output_path
+
+
+def create_all_employee_indexes(force: bool = False):
+    """
+    Create employee indexes for all wiki versions.
+    
+    Args:
+        force: If True, overwrite existing employee indexes
+    """
+    # Find all wiki directories
+    wiki_dirs = []
+    for wiki_dir in WIKI_DATA_DIR.iterdir():
+        if not wiki_dir.is_dir():
+            continue
+        
+        wiki_meta_path = wiki_dir / "wiki_meta.json"
+        if not wiki_meta_path.exists():
+            continue
+        
+        wiki_dirs.append(wiki_dir.name)
+    
+    if not wiki_dirs:
+        print("No wiki versions found")
+        return
+    
+    print(f"Creating employee indexes for {len(wiki_dirs)} wiki version(s)...\n")
+    
+    success_count = 0
+    skip_count = 0
+    error_count = 0
+    
+    for wiki_sha1_prefix in wiki_dirs:
+        print(f"Processing wiki {wiki_sha1_prefix}:")
+        try:
+            result_path = create_employee_index(wiki_sha1_prefix, force=force)
+            # Check if it was skipped (file existed)
+            if not force and (WIKI_DATA_DIR / wiki_sha1_prefix / "rules" / "employee_index.json").exists():
+                skip_count += 1
+            else:
+                success_count += 1
+        except Exception as e:
+            print(f"  ✗ Error: {str(e)}")
+            error_count += 1
+        print()
+    
+    print(f"✓ Summary: {success_count} created, {skip_count} skipped, {error_count} errors")
 
 
 # ============================================================================

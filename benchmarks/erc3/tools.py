@@ -310,7 +310,7 @@ def _paginate(client, request_factory, result_key: str) -> dict:
             return {
                 "items": [],
                 "complete": False,
-                "errors": ["Unable to access data. System may be temporarily unavailable."],
+                "errors": ["Unable to access data. System may be temporarily unavailable. You might want to respond with error_internal"],
                 "pages_fetched": 0,
             }
     
@@ -661,10 +661,9 @@ SYSTEM NOTICE: Unable to verify user identity (/whoami request failed: {message}
 
 This request will be treated as coming from a public (unauthenticated) user.
 
-If the request requires authenticated access, politely decline and explain:
-"I'm currently unable to verify your identity due to a system issue. If you believe you should have access, please contact your system administrator for assistance."
+If the request requires authenticated access, you must respond with error_internal and politely explain:
+"The identity verification system is temporarily unavailable, so I cannot confirm your access level. If you believe you should have access to this information, please contact your system administrator for assistance."
 </whoami_session_context>'''
-    
     is_public = response.get("is_public", True)
     today = response.get("today", "unknown")
     

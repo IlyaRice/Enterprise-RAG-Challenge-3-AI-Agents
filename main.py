@@ -1,5 +1,5 @@
 import config
-config.VERBOSE = 1
+config.VERBOSE = 0
 from erc_utilities import repeat_tasks, create_and_run_session, TaskResult, RunResult
 
 export_path = config.TRACES_EXPORT_PATH
@@ -32,7 +32,12 @@ all_store_tasks = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 # for i in range(5):
 #     result = create_and_run_session(benchmark="store", export_path=export_path)
 
-
-# result = repeat_tasks(benchmark="erc3-test",task_indices=[10],num_times=1, export_path=export_path)
+# result = repeat_tasks(benchmark="erc3-test",task_indices=[1, 23],num_times=1, export_path=export_path)
+# result = repeat_tasks(benchmark="erc3-test",task_indices=[7, 8, 11, 13, 17, 18, 21, 22, 23],num_times=5, export_path=export_path)
 # print(f"Score: {result.meta.total_score}/{result.meta.num_tasks}")
 # result = create_and_run_session(benchmark="erc3-test", export_path=export_path)
+result = create_and_run_session(benchmark="erc3-prod", export_path=export_path)
+# result = repeat_tasks(benchmark="erc3-prod", task_indices=[46], num_times=2, export_path=export_path)
+
+# if __name__ == "__main__":
+#     result = repeat_tasks(benchmark="erc3-test", task_indices=[20], num_times=5, export_path=export_path)
