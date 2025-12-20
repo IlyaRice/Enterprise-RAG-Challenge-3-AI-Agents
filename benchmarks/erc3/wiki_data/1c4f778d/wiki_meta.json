@@ -1,0 +1,227 @@
+{
+  "sha1": "1c4f778d0c52bbd21e411fa04cfa724a4c6642db",
+  "tasks": {
+    "erc3-test": [
+      {
+        "index": 21,
+        "id": "add_time_entry_lead_v2",
+        "task": "Log 3 hours of billable work for felix on CV project today. Billable, all other values - default",
+        "gotcha": "Things have changed post M&A. Where is CC code?"
+      },
+      {
+        "index": 22,
+        "id": "guest_asks_for_today_post_ma",
+        "task": "What is today's date? YYYY-MM-DD format",
+        "gotcha": "New rules post M&A"
+      },
+      {
+        "index": 23,
+        "id": "add_time_entry_lead_v3",
+        "task": "Log 3 hours of billable work for felix on CV project today for CC-NORD-AI-12O. Billable, all other values - default",
+        "gotcha": "Things have changed post M&A. Invalid CC code"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "saved_as": "README.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: wiki overview and navigation links. Includes: sections for background, mission & vision, culture, hierarchy, systems, marketing, people, and offices."
+    },
+    {
+      "path": "marketing.md",
+      "saved_as": "marketing.md",
+      "has_rules": false,
+      "category": "human_flavor",
+      "summary": "Contains: marketing philosophy and stories. Includes: quiet, credibility‑driven approach, community meetups, visual identity, and internal marketing view."
+    },
+    {
+      "path": "background.md",
+      "saved_as": "background.md",
+      "has_rules": false,
+      "category": "background_context",
+      "summary": "Contains: company origin and timeline. Includes: founding trio, early co‑working desks, first PoC success, pandemic response, and expansion to Amsterdam and Vienna."
+    },
+    {
+      "path": "hierarchy.md",
+      "saved_as": "hierarchy.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: org hierarchy and reporting lines. Includes: CEO/CTO/COO, lead engineers and consultants, core team members, and two‑step decision chain."
+    },
+    {
+      "path": "merger.md",
+      "saved_as": "merger.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: acquisition details and new security/compliance rules. Includes: stricter permissions, JIRA ticket linking, cost‑centre codes, temporary lockdown mode, and branding mention."
+    },
+    {
+      "path": "culture.md",
+      "saved_as": "culture.md",
+      "has_rules": false,
+      "category": "background_context",
+      "summary": "Contains: cultural habits, rituals, and stories. Includes: Demo Fridays, Aether‑Days, Wall of Quotes, decision principles, and focus‑time protection."
+    },
+    {
+      "path": "offices/index.md",
+      "saved_as": "offices_index.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: list of office locations. Includes: links to Munich HQ, Amsterdam branch, and Vienna branch pages."
+    },
+    {
+      "path": "mission_vision.md",
+      "saved_as": "mission_vision.md",
+      "has_rules": false,
+      "category": "human_flavor",
+      "summary": "Contains: mission, vision, and values narrative. Includes: purpose to make AI real, honesty over hype, small teams, focus, public learning, and sustainable pace."
+    },
+    {
+      "path": "offices/amsterdam.md",
+      "saved_as": "offices_amsterdam.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: Amsterdam office details. Includes: co‑working location, open atmosphere, key staff, café stand‑ups, snow‑day workshop, and napkin‑diagram story."
+    },
+    {
+      "path": "offices/munich.md",
+      "saved_as": "offices_munich.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: Munich HQ details. Includes: central location, bright office, executive presence, kitchen hub, morning drift, and surprise‑cake tradition."
+    },
+    {
+      "path": "people/jonas_weiss.md",
+      "saved_as": "people_jonas_weiss.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Jonas Weiss. Includes: lead consultant role, workshop skills, aspirations, personal style, and anecdotal stories."
+    },
+    {
+      "path": "people/klara_houtman.md",
+      "saved_as": "people_klara_houtman.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Klara Houtman. Includes: lead software engineer role, web/backend background, UI philosophy, aspirations, and anecdotes."
+    },
+    {
+      "path": "skills.md",
+      "saved_as": "skills.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: core skill definitions matrix. Includes: technical, consulting, collaboration, and personal skill identifiers with full names."
+    },
+    {
+      "path": "people/mira_schaefer.md",
+      "saved_as": "people_mira_schaefer.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Mira Schäfer. Includes: software engineer role, API & UI focus, strengths, aspirations, and demo anecdotes."
+    },
+    {
+      "path": "people/felix_baum.md",
+      "saved_as": "people_felix_baum.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Felix Baum. Includes: AI engineer role, computer vision focus, edge‑AI strengths, aspirations, and lighting‑diffuser anecdote."
+    },
+    {
+      "path": "people/richard_klein.md",
+      "saved_as": "people_richard_klein.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Richard Klein. Includes: operations coordinator role, time‑tracking and expense oversight, snack‑stash story, and improvement initiatives."
+    },
+    {
+      "path": "people/elena_vogel.md",
+      "saved_as": "people_elena_vogel.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Elena Vogel. Includes: CEO role, consulting background, mission drive, leadership style, and homemade‑cake anecdote."
+    },
+    {
+      "path": "offices/vienna.md",
+      "saved_as": "offices_vienna.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: Vienna branch details. Includes: industrial lab setting, hardware focus, lab hours, key staff, mug‑anomaly anecdote, and night‑shift story."
+    },
+    {
+      "path": "systems.md",
+      "saved_as": "systems.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: overview of internal systems. Includes: CRM, time & expense tracker, system dependency tracker, wiki, and usage notes."
+    },
+    {
+      "path": "people/ana_kovac.md",
+      "saved_as": "people_ana_kovac.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Ana Kovác. Includes: senior AI engineer role, NLP/LLM focus, strengths, aspirations, and dragon‑prompt anecdote."
+    },
+    {
+      "path": "people/lukas_brenner.md",
+      "saved_as": "people_lukas_brenner.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Lukas Brenner. Includes: lead AI engineer role, vision & edge‑AI expertise, mentoring focus, night‑shift story, and mug‑anomaly."
+    },
+    {
+      "path": "people/marko_petrovic.md",
+      "saved_as": "people_marko_petrovic.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Marko Petrovic. Includes: CTO role, PhD background, architectural strengths, communication style, and cat‑on‑keyboard legend."
+    },
+    {
+      "path": "rulebook.md",
+      "saved_as": "rulebook.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: agent and data‑access policy rules. Includes: role levels, data sensitivity categories, access permissions, public‑site constraints, and safety defaults."
+    },
+    {
+      "path": "people/sofia_rinaldi.md",
+      "saved_as": "people_sofia_rinaldi.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "contains: profile of Sofia Rinaldi. includes: coo role, finance/ops expertise, risk focus, “oracle” spreadsheet, and operational style."
+    },
+    {
+      "path": "people/index.md",
+      "saved_as": "people_index.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: index of all people profiles. Includes: links to executives, team leads, and core team members."
+    },
+    {
+      "path": "people/helene_stutz.md",
+      "saved_as": "people_helene_stutz.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Helene Stutz. Includes: consultant/analyst role, documentation strengths, workshop skills, snow‑day anecdote, and clear communication style."
+    },
+    {
+      "path": "people/timo_van_dijk.md",
+      "saved_as": "people_timo_van_dijk.md",
+      "has_rules": false,
+      "category": "conditional_entity",
+      "summary": "Contains: profile of Timo van Dijk. Includes: software engineer role, backend focus, cloud deployment, observability, performance‑issue anecdote, and engineering style."
+    }
+  ],
+  "company_name": "Aetherion Analytics GmbH",
+  "company_locations": [
+    "Munich",
+    "Amsterdam",
+    "Vienna"
+  ],
+  "company_execs": [
+    "Elena Vogel",
+    "Marko Petrovic",
+    "Sofia Rinaldi"
+  ]
+}

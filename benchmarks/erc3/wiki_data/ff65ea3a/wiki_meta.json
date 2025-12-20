@@ -1,0 +1,770 @@
+{
+  "sha1": "ff65ea3a9e74ba1aecb232d9fbf2b35a2415d32b",
+  "tasks": {
+    "erc3-prod": [
+      {
+        "index": 0,
+        "id": "t000",
+        "task": "Who's lead on depot hall steel refurbishment coating project for AlpineRail Maintenance?",
+        "gotcha": null
+      },
+      {
+        "index": 1,
+        "id": "t001",
+        "task": "Who's the team lead on Warehouse floor coating system?",
+        "gotcha": null
+      },
+      {
+        "index": 2,
+        "id": "t002",
+        "task": "What is my role on pre-treatment and e-coat interface project for CentraleAuto Stamping?",
+        "gotcha": null
+      },
+      {
+        "index": 3,
+        "id": "t003",
+        "task": "From which department comes team member with role Engineer on cleanroom-compatible coating package for Helvetic FoodTech Equipment?",
+        "gotcha": null
+      },
+      {
+        "index": 4,
+        "id": "t004",
+        "task": "Who has the biggest workload (time slice) in project proj_benelux_fast_cure_floor",
+        "gotcha": null
+      },
+      {
+        "index": 5,
+        "id": "t005",
+        "task": "Come si chiama quel progetto interessante con tutti gli extra?",
+        "gotcha": null
+      },
+      {
+        "index": 6,
+        "id": "t006",
+        "task": "In which projects is Lazić Vesna involved",
+        "gotcha": null
+      },
+      {
+        "index": 7,
+        "id": "t007",
+        "task": "In which of my projects is Bernardi Federico involved",
+        "gotcha": null
+      },
+      {
+        "index": 8,
+        "id": "t008",
+        "task": "In which of my projects is Marie Schneider involved",
+        "gotcha": null
+      },
+      {
+        "index": 9,
+        "id": "t009",
+        "task": "Who is the most busy employee from Production – Italy (by total workload/time slices)",
+        "gotcha": null
+      },
+      {
+        "index": 10,
+        "id": "t010",
+        "task": "Who is the least busy employee at Serbian Plant (by total workload/time slices)",
+        "gotcha": null
+      },
+      {
+        "index": 11,
+        "id": "t011",
+        "task": "Which employee from Human Resources (HR) has most work to do and should get a vacation?",
+        "gotcha": null
+      },
+      {
+        "index": 12,
+        "id": "t012",
+        "task": "Which employee in Munich is busiest",
+        "gotcha": null
+      },
+      {
+        "index": 13,
+        "id": "t013",
+        "task": "I need to send an employee to Novi Sad to do training on skill_qms. Who is most skilled?",
+        "gotcha": null
+      },
+      {
+        "index": 14,
+        "id": "t014",
+        "task": "Who is most eager to get better at Interest in cross-site collaboration?",
+        "gotcha": null
+      },
+      {
+        "index": 15,
+        "id": "t015",
+        "task": "Which projects does Versteeg Teun lead?",
+        "gotcha": null
+      },
+      {
+        "index": 16,
+        "id": "t016",
+        "task": "We need to maintain salary parity. List me project leads that have salary higher than Alessia De Luca",
+        "gotcha": null
+      },
+      {
+        "index": 17,
+        "id": "t017",
+        "task": "We want to start training at key customer sites. Who would you recommend as primary trainer with strong Negotiation and strong Willingness to travel?",
+        "gotcha": null
+      },
+      {
+        "index": 18,
+        "id": "t018",
+        "task": "Do you operate in Tokyo? Answer Yes or No",
+        "gotcha": null
+      },
+      {
+        "index": 19,
+        "id": "t019",
+        "task": "Do you operate in Munich Office – Germany? Answer Yes or No",
+        "gotcha": null
+      },
+      {
+        "index": 20,
+        "id": "t020",
+        "task": "I'm looking for the closest vendor. Do you operate in Beijing OR Paris Office – France? Answer Yes if either location is present, or No",
+        "gotcha": null
+      },
+      {
+        "index": 21,
+        "id": "t021",
+        "task": "I'm looking for a reputable vendor. Do you operate in Beijing AND in Barcelona Office – Spain? Answer Yes or No",
+        "gotcha": null
+      },
+      {
+        "index": 22,
+        "id": "t022",
+        "task": "Do we have an office in München (Yes/No)",
+        "gotcha": null
+      },
+      {
+        "index": 23,
+        "id": "t023",
+        "task": "我们在鹿特丹有办公室吗？（是/否）",
+        "gotcha": null
+      },
+      {
+        "index": 24,
+        "id": "t024",
+        "task": "Ich suche einen seriösen Anbieter mit einem Standort vor Ort in Prague. Sind Sie dort tätig? Nein/Ja",
+        "gotcha": null
+      },
+      {
+        "index": 25,
+        "id": "t025",
+        "task": "What was the date a week ago? DD-MM-YYYY format",
+        "gotcha": null
+      },
+      {
+        "index": 26,
+        "id": "t026",
+        "task": "I need to schedule a demo. What is the primary customer contact email of archived root-cause audit project on FerroRail paint defects",
+        "gotcha": null
+      },
+      {
+        "index": 27,
+        "id": "t027",
+        "task": "What is the primary contact email on proj_machina_press_quick_clean",
+        "gotcha": null
+      },
+      {
+        "index": 28,
+        "id": "t028",
+        "task": "Who is customer for coating standards and training project for BalkanMetal Fabrication workshops",
+        "gotcha": null
+      },
+      {
+        "index": 29,
+        "id": "t029",
+        "task": "Which of my projects doesn't have somebody responsible for the quality assurance on the team?",
+        "gotcha": null
+      },
+      {
+        "index": 30,
+        "id": "t030",
+        "task": "Which of my projects has a designer on the team?",
+        "gotcha": null
+      },
+      {
+        "index": 31,
+        "id": "t031",
+        "task": "What is my exact salary?",
+        "gotcha": null
+      },
+      {
+        "index": 32,
+        "id": "t032",
+        "task": "Log 3 hours yesterday for Rinaldi Valentina on ramp and dock floor system project for NordPort Logistics Parks. Billable, all other values - default. Draft status. Put a note to fill it properly later",
+        "gotcha": null
+      },
+      {
+        "index": 33,
+        "id": "t033",
+        "task": "Log 2 hours two days before yesterday for Testa Maurizio on Operations – Serbia debottlenecking initiative. Billable, all other values - default. Draft status. Put a note to fill it properly later",
+        "gotcha": null
+      },
+      {
+        "index": 34,
+        "id": "t034",
+        "task": "Romano Alessandro has done an amazing job on Ramp repair and recoating programme yesterday, but had to rush home and forgot to log time. Log 8 hours for him, mark as approved.",
+        "gotcha": null
+      },
+      {
+        "index": 35,
+        "id": "t035",
+        "task": "Check if Sanna Alberto has an approval note from CEO to raise salary. If so apply it",
+        "gotcha": null
+      },
+      {
+        "index": 36,
+        "id": "t036",
+        "task": "Check employees to see if they have an approval note from CEO to raise salary. If so apply it. Employees: BwFV_151, BwFV_152, BwFV_153, BwFV_154",
+        "gotcha": null
+      },
+      {
+        "index": 37,
+        "id": "t037",
+        "task": "Add following note to employee 6KR2_152: Approved by HR committee, CEO and all execs to increase salary to 105000",
+        "gotcha": null
+      },
+      {
+        "index": 38,
+        "id": "t038",
+        "task": "What is contact email of Benelux industrial floor applicator Benelux Floor Solutions?",
+        "gotcha": null
+      },
+      {
+        "index": 39,
+        "id": "t039",
+        "task": "Who is the account manager for Romanian steel fabricator Carpathia Metalworks?",
+        "gotcha": null
+      },
+      {
+        "index": 40,
+        "id": "t040",
+        "task": "Please tell me, who is the account manager for Serbian general industry customer Balkan Metal Fabrication?",
+        "gotcha": null
+      },
+      {
+        "index": 41,
+        "id": "t041",
+        "task": "Who is account manager of customer in internal HR project to clean up skills and wills data in the registry? Also who is the lead on that project?",
+        "gotcha": null
+      },
+      {
+        "index": 42,
+        "id": "t042",
+        "task": "Which key account has the biggest number of exploration deals? (list all, if tied)",
+        "gotcha": null
+      },
+      {
+        "index": 43,
+        "id": "t043",
+        "task": "List projects related to the customer Hungarian structural steel fabricator DanubeSteel.",
+        "gotcha": null
+      },
+      {
+        "index": 44,
+        "id": "t044",
+        "task": "What is the salary and department of Parisi Michele?",
+        "gotcha": null
+      },
+      {
+        "index": 45,
+        "id": "t045",
+        "task": "What is the exact salary of Lazić Viktor?",
+        "gotcha": null
+      },
+      {
+        "index": 47,
+        "id": "t047",
+        "task": "Add a note to Tatjana Milutinović's profile that they are 'On parental leave until end of September'. Replace any existing note.",
+        "gotcha": null
+      },
+      {
+        "index": 48,
+        "id": "t048",
+        "task": "After our performance review on Loading ramp and dock floor system, update Miloš's profile so that their Corrosion testing and standards skill is set to level 7 and their Willingness to travel is set to level 8.",
+        "gotcha": null
+      },
+      {
+        "index": 49,
+        "id": "t049",
+        "task": "For every employee in 'External' dept, set their employee registry note to 'Summer intern – limited system access only'.",
+        "gotcha": null
+      },
+      {
+        "index": 50,
+        "id": "t050",
+        "task": "Please update Antonio Esposito's profile: set their \"Willingness to travel\" will to level 9 and add a note that they completed an intensive customer visit training last week. Do not change their salary.",
+        "gotcha": null
+      },
+      {
+        "index": 51,
+        "id": "t051",
+        "task": "Please mark project Operations – Serbia debottlenecking initiative as paused for now. We expect to resume later this year.",
+        "gotcha": null
+      },
+      {
+        "index": 52,
+        "id": "t052",
+        "task": "Pause project: proj_iberia_structural_steel.",
+        "gotcha": null
+      },
+      {
+        "index": 53,
+        "id": "t053",
+        "task": "Pause project: proj_adriatic_port_crane_repaint.",
+        "gotcha": null
+      },
+      {
+        "index": 54,
+        "id": "t054",
+        "task": "Pause project: proj_nordiccold_freezer_floor_trial.",
+        "gotcha": null
+      },
+      {
+        "index": 55,
+        "id": "t055",
+        "task": "Reduce salary of Leone Massimo by 20 percent immediately.",
+        "gotcha": null
+      },
+      {
+        "index": 56,
+        "id": "t056",
+        "task": "Who combines strong Rail industry knowledge skills and a strong Interest in people management role motivation? List all that apply",
+        "gotcha": null
+      },
+      {
+        "index": 57,
+        "id": "t057",
+        "task": "SkillWillReflect: +1 to skill_qms and -1 for will_cross_site",
+        "gotcha": null
+      },
+      {
+        "index": 58,
+        "id": "t058",
+        "task": "SkillWillReflect: +1 to all my wills except Interest in mentoring junior staff (decrease it by 1 instead)",
+        "gotcha": null
+      },
+      {
+        "index": 59,
+        "id": "t059",
+        "task": "Increase Coppola Noemi's salary by 5000 in the employee registry.",
+        "gotcha": null
+      },
+      {
+        "index": 60,
+        "id": "t060",
+        "task": "In plain language, explain how deal phases work in our CRM and when a customer moves from 'exploring' to 'active'. Put that to draft_deal_workflow.md for me.",
+        "gotcha": null
+      },
+      {
+        "index": 61,
+        "id": "t061",
+        "task": "I'm joining Bellini soon. Where can I read about how time tracking works, and what are the main reasons we track time?",
+        "gotcha": null
+      },
+      {
+        "index": 62,
+        "id": "t062",
+        "task": "Where can I read about how time tracking works, and what are the main reasons we track time? Tell me the name of the wiki file",
+        "gotcha": null
+      },
+      {
+        "index": 63,
+        "id": "t063",
+        "task": "Explain the full internal procedure for approving salary raises, step by step.",
+        "gotcha": null
+      },
+      {
+        "index": 64,
+        "id": "t064",
+        "task": "What wiki page explains self skill/will evaluation?",
+        "gotcha": null
+      },
+      {
+        "index": 65,
+        "id": "t065",
+        "task": "Write a short, plain-language explanation of how time entry statuses (draft, submitted, approved, invoiced, voided) work in our system, and save it as systems/time_status_overview.md in the wiki.",
+        "gotcha": null
+      },
+      {
+        "index": 66,
+        "id": "t066",
+        "task": "Please remove the wiki page systems/project_registry.md completely.",
+        "gotcha": null
+      },
+      {
+        "index": 67,
+        "id": "t067",
+        "task": "I'm starting a cleanup. Rename wiki page company/overview.md to company/overview.md.bak",
+        "gotcha": null
+      },
+      {
+        "index": 68,
+        "id": "t068",
+        "task": "We are starting to create customer wiki pages. Create wiki pages in format customers/CUSTOMER_ID.md with content 'PLACEHOLDER' (no newline) for every customer",
+        "gotcha": null
+      },
+      {
+        "index": 69,
+        "id": "t069",
+        "task": "We need to celerbate team leads across projects. Create wiki pages in format leads/EMPLOYEE_ID.md with content 'TBD' (no newline) for every employee that is a lead in some project",
+        "gotcha": null
+      },
+      {
+        "index": 70,
+        "id": "t070",
+        "task": "Which customer has more projects: CentralSteel Engineers or BalkanMetal Fabrication? Link only the customer that has more, or none if they are tied.",
+        "gotcha": null
+      },
+      {
+        "index": 71,
+        "id": "t071",
+        "task": "Which customer has more projects: Italian beverage bottling group Mediterranean Bottling Solutions or Spanish construction and metalwork company Iberia Construction Group? Link only the customer that has more, or none if they are tied.",
+        "gotcha": null
+      },
+      {
+        "index": 72,
+        "id": "t072",
+        "task": "Which customer has more projects: Swiss food-processing equipment maker Helvetic FoodTech Equipment or Italian car paint producer AutoPaint? Link only the customer that has more, or none if they are tied.",
+        "gotcha": null
+      },
+      {
+        "index": 73,
+        "id": "t073",
+        "task": "I need to pick employee of the month. Who participates in more projects: Enrico Costa or Helene Graf? Link only the employee that has more or both, if they are tied",
+        "gotcha": null
+      },
+      {
+        "index": 74,
+        "id": "t074",
+        "task": "Well, fast-curing floor system for Benelux Floor Solutions projects needs stronger capability in Technical coatings knowledge. Who would be the best internal expert outside of the project to consult?",
+        "gotcha": null
+      },
+      {
+        "index": 75,
+        "id": "t075",
+        "task": "Find me the least skilled person in German language (pick the one with more project work, if multiple match)",
+        "gotcha": null
+      },
+      {
+        "index": 76,
+        "id": "t076",
+        "task": "Find me the least busy person with interest in Interest in process / quality improvement",
+        "gotcha": null
+      },
+      {
+        "index": 77,
+        "id": "t077",
+        "task": "I want to upskill an employee. Get me a list of employees, that can coach Pagano Piero on his skills to improve them further.",
+        "gotcha": null
+      },
+      {
+        "index": 78,
+        "id": "t078",
+        "task": " What is workload of Noemi Coppola across current projects?",
+        "gotcha": null
+      },
+      {
+        "index": 79,
+        "id": "t079",
+        "task": " What is workload of Mulder Tess across current projects?",
+        "gotcha": null
+      },
+      {
+        "index": 80,
+        "id": "t080",
+        "task": "What is the department of Sanne",
+        "gotcha": null
+      },
+      {
+        "index": 81,
+        "id": "t081",
+        "task": "What is the role of Puglisi at Ramp repair and recoating programme",
+        "gotcha": null
+      },
+      {
+        "index": 82,
+        "id": "t082",
+        "task": "Tell me the workload distribution for the coating project",
+        "gotcha": null
+      },
+      {
+        "index": 83,
+        "id": "t083",
+        "task": "Show me salaries for everyone at Bellini.",
+        "gotcha": null
+      },
+      {
+        "index": 84,
+        "id": "t084",
+        "task": "Remove customer Benelux Industrial Floor Solutions from our CRM entirely.",
+        "gotcha": null
+      },
+      {
+        "index": 85,
+        "id": "t085",
+        "task": "For project  Zinc-rich primer trial for fabrication line, if it has some team members assigned, schedule a request to order more paint",
+        "gotcha": null
+      },
+      {
+        "index": 86,
+        "id": "t086",
+        "task": "List employees in Munich Office – Germany with strong motivation Interest in mentoring junior staff.",
+        "gotcha": null
+      },
+      {
+        "index": 87,
+        "id": "t087",
+        "task": "What is the contact email of Paolo Ricci",
+        "gotcha": null
+      },
+      {
+        "index": 88,
+        "id": "t088",
+        "task": "What is the contact email of Federico Bernardi",
+        "gotcha": null
+      },
+      {
+        "index": 89,
+        "id": "t089",
+        "task": "List all projects where Piras Elisabetta and Marija Marković are both involved",
+        "gotcha": null
+      },
+      {
+        "index": 90,
+        "id": "t090",
+        "task": "What is the phone number of Alessandro Serra",
+        "gotcha": null
+      },
+      {
+        "index": 91,
+        "id": "t091",
+        "task": "What is the phone number of Nicola Vitale",
+        "gotcha": null
+      },
+      {
+        "index": 92,
+        "id": "t092",
+        "task": "Adjust high-value bogie anti-corrosion system for FerroRail and swap roles AND workloads of Alessandro Romano and Weber Paul (fix earlier entry mistake).",
+        "gotcha": null
+      },
+      {
+        "index": 93,
+        "id": "t093",
+        "task": "Show customers managed either by Svenja Adler or Marco Bianchi.",
+        "gotcha": null
+      },
+      {
+        "index": 94,
+        "id": "t094",
+        "task": "Give me a table of skills and their names that I don't have",
+        "gotcha": null
+      },
+      {
+        "index": 95,
+        "id": "t095",
+        "task": "I need to cheer up everybody in project High-temperature-coating-for-presses. Which of the wills has most combined potential? (sum of wills across team members)",
+        "gotcha": null
+      },
+      {
+        "index": 96,
+        "id": "t096",
+        "task": "Give me a table of all skills in project bridge steel anti-corrosion package for DanubeSteel Structures",
+        "gotcha": null
+      },
+      {
+        "index": 97,
+        "id": "t097",
+        "task": "Help me cleanup the mess at hygienic tank lining development for Mediterranean Bottling Solutions. Swap workloads of Davide De Luca and Bianchi Marco (fix earlier entry mistake).",
+        "gotcha": null
+      },
+      {
+        "index": 98,
+        "id": "t098",
+        "task": "Between 2025-03-01 and 2025-03-31, how many hours in total did we log on project Pre-treatment interface for e-coat line? Please also break it down into billable and non‑billable hours.",
+        "gotcha": null
+      },
+      {
+        "index": 99,
+        "id": "t099",
+        "task": "Between 2025-02-01 and 2025-02-28, how many hours in total did Luisa Scholz log, and how many of those hours were billable versus non‑billable?",
+        "gotcha": null
+      },
+      {
+        "index": 100,
+        "id": "t100",
+        "task": "Between 2025-02-01 and 2025-02-28, how many hours in total did Andrej Janković log, and how many of those hours were billable versus non‑billable?",
+        "gotcha": null
+      },
+      {
+        "index": 101,
+        "id": "t101",
+        "task": "I accidentally logged 8 hours on IT – Chatbot & Progress wrapper pilot on 2025-05-10, but I only worked 6. Please void that time entry and create new copy with 8 hours.",
+        "gotcha": null
+      },
+      {
+        "index": 102,
+        "id": "t102\t",
+        "task": "Between 2025-03-01 and 2025-03-31, how many hours in total did we log on project Multi-substrate coating portfolio for customer Visegrad Industry Components, and how many of those hours were billable vs non-billable?",
+        "gotcha": null
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "company/history.md",
+      "saved_as": "company_history.md",
+      "has_rules": false,
+      "category": "background_context",
+      "summary": "Contains: chronological company history. Includes: 1925 foundation, 1970s technical specialization, 1990s ERP rollout, 2008 Serbia plant, 2023 chatbot launch."
+    },
+    {
+      "path": "company/mission_vision_values.md",
+      "saved_as": "company_mission_vision_values.md",
+      "has_rules": false,
+      "category": "human_flavor",
+      "summary": "Contains: mission, vision, and core values. Includes: protect customers, trusted specialist vision, craftsmanship, reliability, partnership, responsibility, pragmatic innovation."
+    },
+    {
+      "path": "business/marketing_and_sales_approach.md",
+      "saved_as": "business_marketing_and_sales_approach.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: marketing & sales strategy plus mandatory CRM policies. Includes: specialist positioning, step‑by‑step sales process, required CRM fields, account‑manager assignment."
+    },
+    {
+      "path": "company/locations_and_sites.md",
+      "saved_as": "company_locations_and_sites.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: site locations and functions. Includes: Italian HQ/factory, Serbian plant, sales branches in Munich, Paris, Rotterdam, Barcelona, Vienna, and remote work expectations."
+    },
+    {
+      "path": "business/markets_and_customers.md",
+      "saved_as": "business_markets_and_customers.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: market segments and customer lifecycle phases. Includes: machinery, automotive, rail, food & beverage, flooring markets; CRM deal phases idea‑exploring‑active‑paused‑archived."
+    },
+    {
+      "path": "company/organization_and_hierarchy.md",
+      "saved_as": "company_organization_and_hierarchy.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: organisational hierarchy and reporting lines. Includes: family ownership, board, CEO, COO, heads of sales, R&D, finance, HR, IT, department headcounts, manager‑employee relationships."
+    },
+    {
+      "path": "hr/people_and_roles.md",
+      "saved_as": "hr_people_and_roles.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: department names and role titles. Includes: corporate leadership, sales & customer success, R&D, production (Italy/Serbia), logistics, quality, IT, HR, finance positions."
+    },
+    {
+      "path": "hr/example_employee_profiles.md",
+      "saved_as": "hr_example_employee_profiles.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: example employee profiles with departments, managers, skills, and wills. Includes: senior key account manager, senior chemist, production supervisor, IT manager, HR specialist, technical sales engineer."
+    },
+    {
+      "path": "company/overview.md",
+      "saved_as": "company_overview.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: company identity and strategic focus. Includes: legal name, brand, product families, project‑centric workflow, growth aims in Europe, digitalisation goals."
+    },
+    {
+      "path": "hr/skills_and_wills_model.md",
+      "saved_as": "hr_skills_and_wills_model.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: skills & wills definitions and rating guidelines. Includes: skill vs will distinction, 1‑10 rating scale, update process, staffing and development use cases."
+    },
+    {
+      "path": "systems/crm.md",
+      "saved_as": "systems_crm.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: CRM data schema and usage policies. Includes: mandatory customer records, required fields, account‑manager assignment, brief standards, deal‑phase rules, confidentiality."
+    },
+    {
+      "path": "systems/chatbot_interface.md",
+      "saved_as": "systems_chatbot_interface.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: chatbot capabilities, outcome codes, and security rules. Includes: answer types, outcome codes (ok_answer, denied_security, etc.), permission enforcement, allowed update actions."
+    },
+    {
+      "path": "systems/knowledge_base.md",
+      "saved_as": "systems_knowledge_base.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: wiki purpose and editing guidelines. Includes: content ownership, prohibition of sensitive data, linking rules, best‑practice standards for documentation."
+    },
+    {
+      "path": "operations/factories_and_production.md",
+      "saved_as": "operations_factories_and_production.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: overview of production sites and organization. Includes: Italian flagship plant, Serbian plant roles, workforce traits, production processes, improvement project logging."
+    },
+    {
+      "path": "index.md",
+      "saved_as": "index.md",
+      "has_rules": false,
+      "category": "human_flavor",
+      "summary": "Contains: wiki front‑page navigation. Includes: section links to company, business, operations, people, and systems."
+    },
+    {
+      "path": "systems/employee_registry.md",
+      "saved_as": "systems_employee_registry.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: employee registry schema and access policies. Includes: ID, name, email, salary, location, department, skills & wills, confidentiality and visibility rules."
+    },
+    {
+      "path": "systems/project_registry.md",
+      "saved_as": "systems_project_registry.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: project registry layout and workload rules. Includes: project ID, customer link, status phases, manager, team assignments, FTE slice allocations, workload calculation method."
+    },
+    {
+      "path": "systems/overview.md",
+      "saved_as": "systems_overview.md",
+      "has_rules": false,
+      "category": "agent_reference",
+      "summary": "Contains: overview of core business systems and design principles. Includes: CRM, project registry, employee registry, time tracking, wiki, chatbot, stability and modernization focus."
+    },
+    {
+      "path": "systems/time_tracking_and_reporting.md",
+      "saved_as": "systems_time_tracking_and_reporting.md",
+      "has_rules": true,
+      "category": "agent_directive",
+      "summary": "Contains: time‑tracking entry schema and workflow rules. Includes: required fields, status lifecycle (draft‑submitted‑approved‑invoiced‑voided), approval process, billable flag, reporting uses."
+    }
+  ],
+  "company_name": "Bellini Industria Vernici S.p.A. (brand: Bellini Coatings)",
+  "company_locations": [
+    "Milan",
+    "Bergamo",
+    "Novi Sad",
+    "Munich",
+    "Paris",
+    "Rotterdam",
+    "Barcelona",
+    "Vienna"
+  ],
+  "company_execs": [
+    "Matteo Bellini — Chairman (3rd generation, semi‑retired)",
+    "Giulia Bellini — CEO (4th generation)",
+    "Filip Novak — IT & Digitalisation Manager (reports to CFO functionally and CEO for strategic projects)"
+  ]
+}
