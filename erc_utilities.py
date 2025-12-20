@@ -75,7 +75,7 @@ def _run_parallel(func: Callable, items: List, max_workers: int = None, **kwargs
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    max_workers = max_workers or len(items)
+    max_workers = config.MAX_WORKERS or max_workers or len(items)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
@@ -114,7 +114,7 @@ def _run_task_once(benchmark: str, task_index: int, **_lf: Any) -> dict:
 
 
 @observe()
-def _repeat_task(benchmark: str, task_index: int, num_times: int) -> List[dict]:
+def _repeat_task(benchmark: str, task_index: int, num_times: int, current: int = None, total: int = None) -> List[dict]:
     """Run same task spec multiple times in parallel. Returns list of raw dicts."""
     results = _run_parallel(
         lambda _, **kw: _run_task_once(benchmark, task_index, **kw),
@@ -124,7 +124,8 @@ def _repeat_task(benchmark: str, task_index: int, num_times: int) -> List[dict]:
     # Print summary
     total_score = sum(r["score"] for r in results if r["score"] is not None)
     task_text = results[0]["task_text"] if results else "Unknown"
-    print(f"{'#'*30}\nTask {task_index+1}: {task_text}\nTotal: {total_score}/{len(results)}\n{'#'*30}")
+    progress = f" [{current}/{total}]" if current is not None and total is not None else ""
+    print(f"{'#'*30}\nTask {task_index+1}{progress}: {task_text}\nTotal: {total_score}/{len(results)}\n{'#'*30}")
     
     lf = get_client()
     lf.score_current_span(
@@ -218,9 +219,9 @@ def repeat_tasks(
     benchmark: str,
     task_indices: List[int],
     num_times: int,
-    workspace: str = "test",
+    workspace: str = "default",
     name: str = "Standalone tasks",
-    architecture: str = "Multiagent",
+    architecture: str = "PlanReAct agent",
     export_path: Optional[str] = None
 ) -> RunResult:
     """
@@ -230,9 +231,9 @@ def repeat_tasks(
         benchmark: Benchmark name (e.g., "store")
         task_indices: List of task indices to run (e.g., [0, 1, 2])
         num_times: Number of times to run each task
-        workspace: Workspace name (default: "test")
+        workspace: Workspace name (default: "default")
         name: Run name (default: "Standalone tasks")
-        architecture: Architecture description (default: "Multiagent")
+        architecture: Architecture description (default: "PlanReAct agent")
         export_path: Optional path to save results as JSON
     
     Returns:
@@ -242,8 +243,9 @@ def repeat_tasks(
     
     # Run all tasks
     all_results = []
-    for idx in task_indices:
-        task_results = _repeat_task(benchmark, idx, num_times)
+    total_tasks = len(task_indices)
+    for i, idx in enumerate(task_indices, 1):
+        task_results = _repeat_task(benchmark, idx, num_times, current=i, total=total_tasks)
         all_results.extend(task_results)
     
     # Convert to TaskResult objects
@@ -303,8 +305,6 @@ def _run_session(
     erc = ERC3()
     status = erc.session_status(session_id)
     
-    print(f"Session {session_id}: {len(status.tasks)} tasks")
-    
     for task in status.tasks:
         erc.start_task(task)
     
@@ -312,7 +312,7 @@ def _run_session(
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    with ThreadPoolExecutor(max_workers=26) as executor:
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS or 10) as executor:
         futures = {
             executor.submit(
                 run_agent, erc, task, benchmark,
@@ -381,9 +381,9 @@ def _run_session(
 @observe()
 def create_and_run_session(
     benchmark: str,
-    workspace: str = "test",
-    name: str = "I.R.",
-    architecture: str = "Multiagent oss-120b",
+    workspace: str = "default",
+    name: str = None,
+    architecture: str = "PlanReAct agent oss-120b",
     export_path: Optional[str] = None
 ) -> RunResult:
     """
@@ -391,14 +391,18 @@ def create_and_run_session(
     
     Args:
         benchmark: Benchmark name (e.g., "store")
-        workspace: Workspace name (default: "test")
-        name: Session name (default: "I.R.")
-        architecture: Architecture description (default: "Multiagent oss-120b")
+        workspace: Workspace name (default: "default")
+        name: Session name (default: from config.USER_NAME or config.DEFAULT_SESSION_NAME)
+        architecture: Architecture description (default: "PlanReAct agent oss-120b")
         export_path: Optional path to save results as JSON
     
     Returns:
         RunResult with all results sorted by task_index, and consistent meta
     """
+    # Set default name from config
+    if name is None:
+        name = f"{config.USER_NAME} {config.DEFAULT_SESSION_NAME}" if config.USER_NAME else config.DEFAULT_SESSION_NAME
+    
     erc = ERC3()
     session = erc.start_session(
         benchmark=benchmark,
@@ -406,7 +410,6 @@ def create_and_run_session(
         name=name,
         architecture=architecture,
         flags=["compete_accuracy", "compete_budget", "compete_speed", "compete_local"]
-        # flags=["compete_local"]
 
     )
     print(f"Created session {session.session_id} with {session.task_count} tasks")

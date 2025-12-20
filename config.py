@@ -11,5 +11,12 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 ERC3_API_KEY = os.getenv("ERC3_API_KEY")
 TRACES_EXPORT_PATH = os.getenv("TRACES_EXPORT_PATH")
+
+# User/agent identification
+USER_NAME = os.getenv("USER_NAME")  # Optional: Add your name to prefix session names
+DEFAULT_SESSION_NAME = "PlanReAct agent oss-120b"
+
 # Debug/verbose mode - set to "1" in .env to enable detailed prints
 VERBOSE = 0
+# Max workers for parallel execution (None = auto)
+MAX_WORKERS = None
