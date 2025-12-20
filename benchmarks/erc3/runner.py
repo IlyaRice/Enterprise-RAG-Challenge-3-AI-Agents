@@ -66,15 +66,9 @@ def _load_company_info(wiki_sha1: str) -> dict:
     Returns:
         Dict with company_name, company_locations, company_execs
     """
+    defaults = {"company_name": "Unknown", "company_locations": [], "company_execs": []}
+    
     wiki_meta_path = Path(__file__).parent / "wiki_data" / wiki_sha1 / "wiki_meta.json"
-    
-    # Default values if wiki_meta doesn't exist
-    defaults = {
-        "company_name": "Unknown",
-        "company_locations": [],
-        "company_execs": [],
-    }
-    
     if not wiki_meta_path.exists():
         if config.VERBOSE:
             print(f"  ℹ No wiki_meta.json found, using defaults")
@@ -198,14 +192,13 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     # Context gathering pipeline
     whoami = whoami_raw(benchmark_client)
     task_ctx = TaskContext(erc_client=erc_client, task_id=task.task_id, model=LLM_MODEL_LOG_NAME, whoami=whoami)
-    collected = collect_context_blocks(benchmark_client, task)
+    collected = collect_context_blocks(benchmark_client, task, workers=10)
     
-    # Run context_builder
+    # Run context builder
     lf = get_client()
     trace_id = lf.get_current_trace_id()
     parent_obs_id = lf.get_current_observation_id()
     
-    # Run context builder
     try:
         selected_blocks = run_context_builder(
             task.task_text,

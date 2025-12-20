@@ -22,7 +22,7 @@ import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from infrastructure import call_llm
-from .prompts import (
+from .ingestion_prompts import (
     FileExtraction, ExtractedRulesResponse, ValidatorResponse,
     ResponseRuleExtraction,
     extraction_prompt_public, extraction_prompt_authenticated, 
@@ -315,6 +315,8 @@ Address this feedback and try again."""
     
     print("    Max attempts reached, returning last result")
     return _format_response_rules(last_result) if last_result else ""
+
+
 def load_respond_rules_for_session(whoami: dict) -> str:
     """Load pre-extracted respond rules (unified for all users)."""
     if whoami.get("error") or not whoami.get("wiki_sha1"):
@@ -339,16 +341,10 @@ def load_rules_for_session(whoami: dict) -> str:
     Returns:
         Rules content as string, or empty string if not available
     """
-    # Handle whoami errors
-    if whoami.get("error"):
-        return ""
-    
     wiki_sha1 = whoami.get("wiki_sha1", "")
-    if not wiki_sha1:
+    if not wiki_sha1 or whoami.get("error"):
         return ""
     
     wiki_dir = Path(__file__).parent / "wiki_data" / wiki_sha1[:8]
-    
-    # Load rules based on user type
     category = "public" if whoami.get("is_public", True) else "authenticated"
     return load_rules(str(wiki_dir), category) or ""

@@ -16,7 +16,7 @@ from erc3.erc3.dtos import (
     Req_TimeSummaryByEmployee, Req_TimeSummaryByProject,
 )
 
-from .prompts import (
+from .runtime_prompts import (
     NextStepERC3Orchestrator,
     ERC3StepValidatorResponse,
     system_prompt_erc3_orchestrator,
@@ -25,9 +25,6 @@ from .prompts import (
     Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
     Req_LoadRespondInstructions,
 )
-
-# No meta-tools for ERC3 (single-agent architecture)
-META_TOOLS = ()
 
 # Terminal action (SDK /respond endpoint)
 TERMINAL_ACTIONS = (Req_ProvideAgentResponse,)
@@ -38,7 +35,7 @@ AGENT_REGISTRY = {
         "name": "ERC3Orchestrator",
         "system_prompt": system_prompt_erc3_orchestrator,
         "schema": NextStepERC3Orchestrator,
-        "max_steps": 30,
+        "max_steps": 40,
         "tool_type": "sdk",
     },
 }
@@ -59,7 +56,7 @@ VALIDATOR_REGISTRY = {
         "name": "ERC3StepValidator",
         "system_prompt": system_prompt_erc3_step_validator,
         "schema": ERC3StepValidatorResponse,
-        "triggers_on_tools": (Req_ProvideAgentResponse),
+        "triggers_on_tools": NON_RESPOND_TOOLS,
         "applies_to_agents": ("ERC3Orchestrator",),
         "max_attempts": 2,
     },

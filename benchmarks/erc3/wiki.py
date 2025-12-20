@@ -24,7 +24,7 @@ from erc3 import ERC3, TaskInfo
 from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI, Req_ListEmployees, Req_GetEmployee
 from langfuse import observe
 from infrastructure import call_llm
-from .prompts import TaggingResponse, ValidatorResponse, tagging_prompt, validator_prompt
+from .ingestion_prompts import TaggingResponse, ValidatorResponse, tagging_prompt, validator_prompt
 from .tools import _paginate
 import config
 

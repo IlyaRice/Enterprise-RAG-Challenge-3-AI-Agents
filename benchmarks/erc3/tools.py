@@ -28,7 +28,7 @@ from erc3.erc3.dtos import (
 )
 from infrastructure import execute_sdk_call, dispatch_with_retry
 # Import wrappers (LLM-facing, no limit/offset) - shadowing is OK, they're used in different contexts
-import benchmarks.erc3.prompts as erc3_prompts
+import benchmarks.erc3.runtime_prompts as erc3_prompts
 from .rules import load_respond_rules_for_session
 
 
@@ -1123,10 +1123,7 @@ def execute_single_call(function, benchmark_client, task_ctx=None) -> dict:
 # ============================================================================
 
 def execute_erc3_tools(job, benchmark_client, task_ctx=None) -> dict:
-    """Execute SDK tool(s) for ERC3 benchmark. Returns dict with text, tool_calls, function."""
-    if job.call.call_mode == "single":
-        function = job.call.function
-        result = execute_single_call(function, benchmark_client, task_ctx)
-        return {"text": result["text"], "tool_calls": [result["tool_call"]], "function": function}
-    else:
-        raise ValueError(f"Unsupported call_mode for ERC3: {job.call.call_mode}")
+    """Execute SDK tool for ERC3 benchmark. Returns dict with text, tool_calls, function."""
+    function = job.function
+    result = execute_single_call(function, benchmark_client, task_ctx)
+    return {"text": result["text"], "tool_calls": [result["tool_call"]], "function": function}

@@ -11,7 +11,7 @@ from langfuse import observe
 
 from infrastructure import call_llm
 from .tools import CollectedContext
-from .prompts import (
+from .runtime_prompts import (
     ContextSelection,
     system_prompt_context_builder,
 )

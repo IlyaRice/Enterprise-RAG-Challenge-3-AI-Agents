@@ -23,7 +23,6 @@ from infrastructure import (
 )
 from .agent_config import VALIDATOR_REGISTRY, is_terminal_action
 from .tools import execute_erc3_tools
-from .prompts import ERC3StepValidatorResponse, system_prompt_erc3_step_validator
 
 
 # ============================================================================
@@ -47,6 +46,7 @@ def run_erc3_step_validator(
     node_id = next_node_id(parent_node_id, sibling_count)
     validator_name = validator_config["name"]
     system_prompt = validator_config["system_prompt"]
+    schema = validator_config["schema"]
     
     separator = "#" * 15
     conversation_turns = []
@@ -75,8 +75,6 @@ PROPOSED NEXT STEP:
     
     llm_start = time.time()
     
-    # Use schema from validator_config (dynamic)
-    schema = validator_config["schema"]
     
     try:
         llm_result = call_llm(
@@ -162,7 +160,7 @@ def validate_and_retry_erc3_step(
     agent_name = agent_config["name"]
     job = llm_result["parsed"]
     
-    function_to_execute = getattr(job.call, "function", None)
+    function_to_execute = getattr(job, "function", None)
     if function_to_execute is None:
         node_id = next_node_id(parent_node_id, step_count)
         return {
@@ -197,7 +195,7 @@ def validate_and_retry_erc3_step(
     
     for attempt in range(max_attempts + 1):
         job = current_llm_result["parsed"]
-        function_to_execute = getattr(job.call, "function", None)
+        function_to_execute = getattr(job, "function", None)
         
         # Tool switched outside validator's scope - re-validate with correct validator
         if not isinstance(function_to_execute, validator_config["triggers_on_tools"]):
@@ -326,7 +324,7 @@ def run_erc3_agent_loop(
         
         job = llm_result["parsed"]
         latest_plan = getattr(job, "remaining_work", None)
-        function_to_execute = getattr(job.call, "function", None)
+        function_to_execute = getattr(job, "function", None)
         
         if function_to_execute is None:
             raise ValueError("ERC3 orchestrator produced a step without a function to execute.")
@@ -351,11 +349,8 @@ def run_erc3_agent_loop(
             func_name = function_to_execute.tool if hasattr(function_to_execute, "tool") else type(function_to_execute).__name__
             print(f"  {node_id} {func_name} ({llm_result['timing']:.2f}s)")
         
-        if job.call.call_mode == "single":
-            func_obj = sdk_result["function"]
-            assistant_content = f'Step completed.\nAction: {job.next_action}\nTool called: {func_obj.model_dump_json()}\nResponse received: {sdk_result["text"]}'
-        else:
-            assistant_content = f'Step completed.\nAction\n"{job.next_action}"\n\n{sdk_result["text"]}'
+        func_obj = sdk_result["function"]
+        assistant_content = f'Step completed.\nAction: {job.next_action}\nTool called: {func_obj.model_dump_json()}\nResponse received: {sdk_result["text"]}'
         
         inject_plan(conversation, latest_plan)
         conversation.append({"role": "assistant", "content": assistant_content})
