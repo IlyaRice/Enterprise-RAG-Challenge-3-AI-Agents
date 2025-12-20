@@ -6,7 +6,7 @@ Contains:
 - Directory formatters: format_employees_list, format_customers_list, format_projects_list
 - Context gathering: whoami_raw, format_whoami, employee_raw, format_employee
 - Wiki search: search_wiki, format_wiki_search (BM25 + fuzzy hybrid)
-- Context blocks: collect_context_blocks, build_orchestrator_context
+- Context blocks: collect_context_blocks, build_agent_context
 - SDK execution: execute_single_call, execute_erc3_tools
 
 Uses shared execute_sdk_call from infrastructure for core SDK dispatch.
@@ -958,19 +958,19 @@ def collect_context_blocks(client, task_info=None, workers: int = 4) -> Collecte
     return result
 
 
-def build_orchestrator_context(
+def build_agent_context(
     collected: CollectedContext,
     selected_blocks: List[str],
 ) -> str:
     """
-    Build formatted context string for orchestrator prompt.
+    Build formatted context string for agent prompt.
     
     Args:
         collected: CollectedContext from collect_context_blocks()
         selected_blocks: List of block names selected by context_builder
     
     Returns:
-        Formatted context string ready for orchestrator prompt
+        Formatted context string ready for agent prompt
     """
     parts = []
     

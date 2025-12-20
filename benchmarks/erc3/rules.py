@@ -24,17 +24,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from infrastructure import call_llm
 from .ingestion_prompts import (
     FileExtraction, ExtractedRulesResponse, ValidatorResponse,
-    ResponseRuleExtraction,
-    extraction_prompt_public, extraction_prompt_authenticated, 
-    extraction_prompt_response,
-    validator_prompt,
+    RespondRuleExtraction,
+    prompt_public_rules_extractor, prompt_authenticated_rules_extractor, 
+    prompt_respond_rules_extractor,
+    prompt_extraction_validator,
 )
 
 
 CATEGORY_PROMPTS = {
-    "public": extraction_prompt_public,
-    "authenticated": extraction_prompt_authenticated,
-    "response": extraction_prompt_response,
+    "public": prompt_public_rules_extractor,
+    "authenticated": prompt_authenticated_rules_extractor,
+    "respond": prompt_respond_rules_extractor,
 }
 
 
@@ -75,8 +75,8 @@ def _format_result(files: List[FileExtraction]) -> str:
     return "\n\n".join(parts)
 
 
-def _format_response_rules(extraction: 'ResponseRuleExtraction') -> str:
-    """Format ResponseRuleExtraction as markdown with headers and metadata comments."""
+def _format_respond_rules(extraction: 'RespondRuleExtraction') -> str:
+    """Format RespondRuleExtraction as markdown with headers and metadata comments."""
     parts = []
     
     # Outcome Rules
@@ -153,7 +153,7 @@ Very carefully assess whether this result correctly fulfills the task."""
 
         v_result = call_llm(
             schema=ValidatorResponse,
-            system_prompt=validator_prompt,
+            system_prompt=prompt_extraction_validator,
             conversation=[{"role": "user", "content": validator_message}],
             reasoning_effort="high",
         )
@@ -219,19 +219,19 @@ def extract_all_rules(wiki_dir: str, max_attempts: int = 4) -> dict:
         else:
             print(f"  No rules extracted for {category}")
     
-    # Extract response rules (unified for all users)
+    # Extract respond rules (unified for all users)
     print(f"\n{'='*50}")
-    print(f"Category: response")
+    print(f"Category: respond")
     print('='*50)
     
-    response_content = extract_response_formatting_rules(wiki_dir, max_attempts)
-    if response_content:
-        file_path = rules_dir / "response_struct.md"
-        file_path.write_text(response_content, encoding="utf-8")
-        result["response"] = str(file_path)
+    respond_content = extract_respond_rules(wiki_dir, max_attempts)
+    if respond_content:
+        file_path = rules_dir / "respond_struct.md"
+        file_path.write_text(respond_content, encoding="utf-8")
+        result["respond"] = str(file_path)
         print(f"  Saved to {file_path}")
     else:
-        print(f"  No rules extracted for response")
+        print(f"  No rules extracted for respond")
     
     return result
 
@@ -242,13 +242,13 @@ def load_rules(wiki_dir: str, category: str) -> str | None:
     return rules_path.read_text(encoding="utf-8") if rules_path.exists() else None
 
 
-def extract_response_formatting_rules(wiki_dir: str, max_attempts: int = 4) -> str:
-    """Extract categorized response rules from wiki files with specified tags."""
+def extract_respond_rules(wiki_dir: str, max_attempts: int = 4) -> str:
+    """Extract categorized respond tool rules from wiki files with specified tags."""
     wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
     if not wiki_content:
         return ""
     
-    print("Extracting categorized response rules from wiki files...")
+    print("Extracting categorized respond rules from wiki files...")
     
     original_user_message = f"Extract all relevant content from the following wiki files:\n\n{wiki_content}"
     current_user_message = original_user_message
@@ -259,8 +259,8 @@ def extract_response_formatting_rules(wiki_dir: str, max_attempts: int = 4) -> s
         
         # Extract with new schema
         result = call_llm(
-            schema=ResponseRuleExtraction,
-            system_prompt=extraction_prompt_response,
+            schema=RespondRuleExtraction,
+            system_prompt=prompt_respond_rules_extractor,
             conversation=[{"role": "user", "content": current_user_message}],
             reasoning_effort="high",
         )
@@ -271,12 +271,12 @@ def extract_response_formatting_rules(wiki_dir: str, max_attempts: int = 4) -> s
         print(f"    Extracted {total_chars} chars across 4 categories")
         
         # Format for validation
-        formatted_output = _format_response_rules(parsed)
+        formatted_output = _format_respond_rules(parsed)
         
         # Validate
         validator_message = f"""TASK:
 <system_prompt>
-{extraction_prompt_response}
+{prompt_respond_rules_extractor}
 </system_prompt>
 
 <user_prompt>
@@ -291,7 +291,7 @@ Very carefully assess whether this result correctly fulfills the task."""
 
         v_result = call_llm(
             schema=ValidatorResponse,
-            system_prompt=validator_prompt,
+            system_prompt=prompt_extraction_validator,
             conversation=[{"role": "user", "content": validator_message}],
             reasoning_effort="high",
         )
@@ -314,7 +314,7 @@ Rejection feedback: {v_parsed.rejection_message}
 Address this feedback and try again."""
     
     print("    Max attempts reached, returning last result")
-    return _format_response_rules(last_result) if last_result else ""
+    return _format_respond_rules(last_result) if last_result else ""
 
 
 def load_respond_rules_for_session(whoami: dict) -> str:
@@ -323,7 +323,7 @@ def load_respond_rules_for_session(whoami: dict) -> str:
         return ""
     
     wiki_dir = Path(__file__).parent / "wiki_data" / whoami["wiki_sha1"][:8]
-    rules_path = wiki_dir / "rules" / "response_struct.md"
+    rules_path = wiki_dir / "rules" / "respond_struct.md"
     
     return rules_path.read_text(encoding="utf-8") if rules_path.exists() else ""
 

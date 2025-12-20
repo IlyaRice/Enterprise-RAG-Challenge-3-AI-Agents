@@ -8,7 +8,7 @@ Wikis are stored by SHA prefix only - shared across benchmarks.
 Usage:
     python scripts/erc3_prep.py ingest erc3-dev       # Download wikis for benchmark
     python scripts/erc3_prep.py export erc3-dev       # Export specs to docs
-    python scripts/erc3_prep.py tag-files             # Tag all wiki files
+    python scripts/erc3_prep.py index-files           # Index wiki files with metadata
     python scripts/erc3_prep.py extract-rules         # Extract rules from all wikis
     python scripts/erc3_prep.py all erc3-dev          # All: ingest + export
     python scripts/erc3_prep.py all                   # All benchmarks
@@ -21,7 +21,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from benchmarks.erc3.wiki import ingest_wikis, export_specs_info, get_wiki_data_path, tag_wiki_files
+from benchmarks.erc3.wiki import ingest_wikis, export_specs_info, get_wiki_data_path, index_wiki_files
 from benchmarks.erc3.rules import extract_all_rules
 
 
@@ -63,8 +63,8 @@ def cmd_all(args):
 
 
 def cmd_prep(args):
-    """Run all wiki enrichment (tag-files + extract-rules)."""
-    cmd_tag_files(args)
+    """Run all wiki enrichment (index-files + extract-rules)."""
+    cmd_index_files(args)
     print("\n" + "="*60)
     cmd_extract_rules(args)
 
@@ -103,12 +103,12 @@ def cmd_extract_rules(args):
             print(f"  ✗ Error: {e}")
 
 
-def cmd_tag_files(args):
-    """Tag wiki files with has_rules flag (all wikis, shared across benchmarks)."""
+def cmd_index_files(args):
+    """Index wiki files with metadata (all wikis, shared across benchmarks)."""
     import json
     
     print(f"\n{'='*60}")
-    print(f"Tagging files for all wikis")
+    print(f"Indexing files for all wikis")
     print('='*60)
     
     wiki_base = get_wiki_data_path()
@@ -125,17 +125,17 @@ def cmd_tag_files(args):
         if not wiki_meta_path.exists():
             continue
         
-        # Check if already tagged
+        # Check if already indexed
         wiki_meta = json.loads(wiki_meta_path.read_text(encoding="utf-8"))
-        already_tagged = any("has_rules" in f for f in wiki_meta.get("files", []))
-        if already_tagged and not args.force:
-            print(f"  {sha_dir.name}: already tagged, skipping (use --force to re-tag)")
+        already_indexed = any("has_rules" in f for f in wiki_meta.get("files", []))
+        if already_indexed and not args.force:
+            print(f"  {sha_dir.name}: already indexed, skipping (use --force to re-index)")
             continue
         
         print(f"\n  {sha_dir.name}:")
         try:
-            result = tag_wiki_files(str(sha_dir))
-            print(f"  Tagged {result['tagged']} files, {result['with_rules']} have rules, categories: {result['categories']}")
+            result = index_wiki_files(str(sha_dir))
+            print(f"  Indexed {result['indexed']} files, {result['with_rules']} have rules, categories: {result['categories']}")
         except Exception as e:
             print(f"  ✗ Error: {e}")
 
@@ -147,7 +147,7 @@ def main():
         epilog="""
 Examples:
   python scripts/erc3_prep.py ingest erc3-dev       Download wikis for erc3-dev
-  python scripts/erc3_prep.py tag-files             Tag all wiki files with has_rules
+  python scripts/erc3_prep.py index-files           Index wiki files with metadata
   python scripts/erc3_prep.py extract-rules         Extract rules from all wikis
   python scripts/erc3_prep.py export erc3-test      Export specs for erc3-test
   python scripts/erc3_prep.py all erc3-dev          Both ingest + export for erc3-dev
@@ -165,13 +165,13 @@ Examples:
     )
     ingest_parser.set_defaults(func=cmd_ingest)
     
-    # Tag files command (works on all wikis - shared across benchmarks)
-    tag_parser = subparsers.add_parser("tag-files", help="Tag files with has_rules flag (all wikis)")
-    tag_parser.add_argument(
+    # Index files command (works on all wikis - shared across benchmarks)
+    index_parser = subparsers.add_parser("index-files", help="Index files with metadata (all wikis)")
+    index_parser.add_argument(
         "--force", "-f", action="store_true",
-        help="Re-tag even if already tagged"
+        help="Re-index even if already indexed"
     )
-    tag_parser.set_defaults(func=cmd_tag_files)
+    index_parser.set_defaults(func=cmd_index_files)
     
     # Export command
     export_parser = subparsers.add_parser("export", help="Export specs info to markdown")
@@ -190,7 +190,7 @@ Examples:
     extract_parser.set_defaults(func=cmd_extract_rules)
     
     # Prep command (enrichment pipeline)
-    prep_parser = subparsers.add_parser("prep", help="Run all wiki enrichment (tag + rules)")
+    prep_parser = subparsers.add_parser("prep", help="Run all wiki enrichment (index + rules)")
     prep_parser.add_argument(
         "--force", "-f", action="store_true",
         help="Force re-processing even if files exist"

@@ -4,9 +4,9 @@ ERC3 ingestion prompts and schemas.
 Used during wiki preparation/ingestion.
 
 Contains:
-- Rule extraction: Schemas and prompts for extracting public/authenticated/response rules
-- Tagging: Schemas and prompts for tagging wiki files with metadata
-- Validation: Generic validator used by both rule extraction and tagging
+- Rule extraction: Schemas and prompts for extracting public/authenticated/respond rules
+- Wiki indexing: Schemas and prompts for indexing wiki files with metadata
+- Validation: Extraction validator used by both rule extraction and wiki indexing
 """
 
 from typing import List, Literal
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 # RULE EXTRACTION - PUBLIC & AUTHENTICATED USER RULES
 # ============================================================================
 
-extraction_prompt_public = """
+prompt_public_rules_extractor = """
 Your task is to retrieve a subset of rules for a corporate AI chatbot agent. 
 However, at this stage, any rules concerning AUTHENTICATED users (logged-in employees, staff members) are completely irrelevant. 
 Also completely irrelevant are rules concerning response formatting using the /respond tool.
@@ -45,7 +45,7 @@ For intertwined content: surgically extract only what's relevant, preserving ori
 Return rules preserving original phrasing where possible (non-critical deviations are acceptable), maintaining formatting and headers.
 """
 
-extraction_prompt_authenticated = """
+prompt_authenticated_rules_extractor = """
 Your task is to retrieve a subset of rules for a corporate AI chatbot agent. 
 However, at this stage, any rules concerning PUBLIC users (guests, anonymous visitors, unauthenticated users) are completely irrelevant. 
 Also completely irrelevant are rules concerning response formatting using the /respond tool.
@@ -90,7 +90,7 @@ class ExtractedRulesResponse(BaseModel):
 # RESPONSE RULE EXTRACTION
 # ============================================================================
 
-extraction_prompt_response = """
+prompt_respond_rules_extractor = """
 <role>
 You are a Systems Architect extracting rules for the /respond tool in a categorized structure.
 </role>
@@ -186,7 +186,7 @@ If it's about internal tool usage (not /respond output) → EXCLUDE
 """
 
 
-class ResponseRuleExtraction(BaseModel):
+class RespondRuleExtraction(BaseModel):
     """Categorized rule extraction for /respond tool behavior."""
     outcome_rules: str = Field(..., description="Rules for when to use each outcome type")
     link_rules: str = Field(..., description="Rules for each link kind")
@@ -199,7 +199,7 @@ class ResponseRuleExtraction(BaseModel):
 # VALIDATOR
 # ============================================================================
 
-validator_prompt = """
+prompt_extraction_validator = """
 <role>
 You are a quality validator. You assess whether a task was completed correctly.
 </role>
@@ -248,11 +248,11 @@ class ValidatorResponse(BaseModel):
 
 
 # ============================================================================
-# FILE TAGGING
+# WIKI INDEXING
 # ============================================================================
-# Identifies which wiki files contain rules/policies and enriches with metadata.
+# Indexes wiki files with metadata (category, summary, has_rules) and extracts company info.
 
-tagging_prompt = """
+prompt_wiki_indexer = """
 <role>
 You are creating a metadata index for an AI agent system. This index helps the agent decide which wiki files to load for each task.
 </role>
@@ -311,7 +311,7 @@ class CompanyInfo(BaseModel):
     locations: List[str] = Field(..., description="Office cities only")
     executives: List[str] = Field(..., description="Leadership names with roles")
 
-class FileTag(BaseModel):
+class IndexedFile(BaseModel):
     """Metadata for a single wiki file."""
     filename: str = Field(..., description="Wiki filename (e.g., 'rulebook.md')")
     category: Literal["agent_directive", "agent_reference", "background_context", "human_flavor", "conditional_entity"] = Field(
@@ -322,7 +322,7 @@ class FileTag(BaseModel):
     has_rules: bool = Field(..., description="True if file contains actionable rules/policies that constrain agent behavior")
 
 
-class TaggingResponse(BaseModel):
-    """Response from file tagging LLM."""
-    files: List[FileTag] = Field(..., description="Metadata for each wiki file")
+class WikiIndexResponse(BaseModel):
+    """Response from wiki indexer LLM."""
+    files: List[IndexedFile] = Field(..., description="Metadata for each wiki file")
     company: CompanyInfo = Field(..., description="Company basic info extracted from wiki files")

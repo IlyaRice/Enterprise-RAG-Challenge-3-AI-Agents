@@ -8,10 +8,10 @@ wikis with the same SHA are identical regardless of which benchmark uses them.
 Also provides benchmark metadata export for development reference.
 
 Usage:
-    from benchmarks.erc3.wiki import ingest_wikis, tag_wiki_files, export_specs_info
+    from benchmarks.erc3.wiki import ingest_wikis, index_wiki_files, export_specs_info
     
     ingest_wikis("erc3-dev")       # Download erc3-dev wikis
-    tag_wiki_files(wiki_dir)       # Tag files with has_rules
+    index_wiki_files(wiki_dir)     # Index files with metadata
     export_specs_info("erc3-dev")  # Export specs to docs/erc3/
 """
 
@@ -24,7 +24,7 @@ from erc3 import ERC3, TaskInfo
 from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI, Req_ListEmployees, Req_GetEmployee
 from langfuse import observe
 from infrastructure import call_llm
-from .ingestion_prompts import TaggingResponse, ValidatorResponse, tagging_prompt, validator_prompt
+from .ingestion_prompts import WikiIndexResponse, ValidatorResponse, prompt_wiki_indexer, prompt_extraction_validator
 from .tools import _paginate
 import config
 
@@ -302,20 +302,20 @@ def export_specs_info(benchmark_name: str) -> Path:
 
 
 # ============================================================================
-# FILE TAGGING
+# WIKI INDEXING
 # ============================================================================
 
 @observe()
-def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
+def index_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
     """
-    Tag wiki files with has_rules flag using LLM.
+    Index wiki files with metadata using LLM.
     
     Args:
         wiki_dir: Path to wiki directory containing wiki_meta.json
         max_attempts: Max validation retry attempts
     
     Returns:
-        Dict with counts: {"tagged": N, "with_rules": M}
+        Dict with counts: {"indexed": N, "with_rules": M}
     """
     wiki_path = Path(wiki_dir)
     wiki_meta_path = wiki_path / "wiki_meta.json"
@@ -327,7 +327,7 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
     files = wiki_meta.get("files", [])
     
     if not files:
-        return {"tagged": 0, "with_rules": 0}
+        return {"indexed": 0, "with_rules": 0}
     
     # Load all file contents
     file_contents = []
@@ -346,10 +346,10 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
     for attempt in range(1, max_attempts + 1):
         print(f"  Attempt {attempt}/{max_attempts}...")
         
-        # Tag
+        # Index
         t_result = call_llm(
-            schema=TaggingResponse,
-            system_prompt=tagging_prompt,
+            schema=WikiIndexResponse,
+            system_prompt=prompt_wiki_indexer,
             conversation=[{"role": "user", "content": current_user_message}],
             reasoning_effort="high",
         )
@@ -357,26 +357,26 @@ def tag_wiki_files(wiki_dir: str, max_attempts: int = 2) -> dict:
         last_result = t_parsed
         
         # Count categories and rules
-        files_with_rules = sum(1 for tag in last_result.files if tag.has_rules)
+        files_with_rules = sum(1 for indexed_file in last_result.files if indexed_file.has_rules)
         category_counts = {}
-        for tag in last_result.files:
-            category_counts[tag.category] = category_counts.get(tag.category, 0) + 1
+        for indexed_file in last_result.files:
+            category_counts[indexed_file.category] = category_counts.get(indexed_file.category, 0) + 1
         
-        print(f"    Tagged {len(last_result.files)} files:")
+        print(f"    Indexed {len(last_result.files)} files:")
         print(f"      - {files_with_rules} with rules")
         print(f"      - Categories: {dict(category_counts)}")
         
         # Validate - format output as structured list
-        formatted_output = "File Tags:\n"
-        for tag in last_result.files:
-            formatted_output += f"\n{tag.filename}:\n"
-            formatted_output += f"  has_rules: {tag.has_rules}\n"
-            formatted_output += f"  category: {tag.category}\n"
-            formatted_output += f"  summary: {tag.summary}\n"
+        formatted_output = "File Index:\n"
+        for indexed_file in last_result.files:
+            formatted_output += f"\n{indexed_file.filename}:\n"
+            formatted_output += f"  has_rules: {indexed_file.has_rules}\n"
+            formatted_output += f"  category: {indexed_file.category}\n"
+            formatted_output += f"  summary: {indexed_file.summary}\n"
         
         validator_message = f"""TASK:
 <system_prompt>
-{tagging_prompt}
+{prompt_wiki_indexer}
 </system_prompt>
 
 <user_prompt>
@@ -396,7 +396,7 @@ Be especially rigorous about has_rules accuracy as this is the most critical fie
 
         v_result = call_llm(
             schema=ValidatorResponse,
-            system_prompt=validator_prompt,
+            system_prompt=prompt_extraction_validator,
             conversation=[{"role": "user", "content": validator_message}],
             reasoning_effort="high",
         )
@@ -426,11 +426,11 @@ Address this feedback and try again."""
     
     # Update wiki_meta with all three fields
     for f in files:
-        matching_tag = next((tag for tag in last_result.files if tag.filename == f["saved_as"]), None)
-        if matching_tag:
-            f["has_rules"] = matching_tag.has_rules
-            f["category"] = matching_tag.category
-            f["summary"] = matching_tag.summary
+        indexed_file = next((indexed for indexed in last_result.files if indexed.filename == f["saved_as"]), None)
+        if indexed_file:
+            f["has_rules"] = indexed_file.has_rules
+            f["category"] = indexed_file.category
+            f["summary"] = indexed_file.summary
         else:
             print("No metadata generated for file: ", f["saved_as"])
             f["has_rules"] = False
@@ -447,7 +447,7 @@ Address this feedback and try again."""
         category_counts_final[cat] = category_counts_final.get(cat, 0) + 1
     
     return {
-        "tagged": len(files),
+        "indexed": len(files),
         "with_rules": files_with_rules_final,
         "categories": category_counts_final,
     }

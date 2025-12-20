@@ -35,7 +35,7 @@ from benchmarks.store.prompts import (
     StepValidatorResponse,
     # ProductExplorer
     ProductExplorerResponse, ProductExplorer,
-    system_prompt_product_explorer,
+    prompt_product_explorer,
 )
 from benchmarks.store.tools import execute_get_all_products, execute_store_tools
 
@@ -399,7 +399,7 @@ Analyze the products above and answer the task."""
     try:
         llm_result = call_llm(
             schema=ProductExplorerResponse,
-            system_prompt=system_prompt_product_explorer,
+            system_prompt=prompt_product_explorer,
             conversation=[{"role": "user", "content": user_message}],
             task_ctx=task_ctx,
         )
@@ -414,7 +414,7 @@ Analyze the products above and answer the task."""
             parent_node_id=parent_node_id,
             sibling_index=0,
             context="ProductExplorer",
-            system_prompt=system_prompt_product_explorer,
+            system_prompt=prompt_product_explorer,
             input_messages=[{"role": "user", "content": user_message}],
             output=parsed.model_dump(),
             reasoning=reasoning,
@@ -441,7 +441,7 @@ Analyze the products above and answer the task."""
             parent_node_id=parent_node_id,
             sibling_index=0,
             context="ProductExplorer",
-            system_prompt=system_prompt_product_explorer,
+            system_prompt=prompt_product_explorer,
             input_messages=[{"role": "user", "content": user_message}],
             output={"error": str(e)},
             reasoning=None,

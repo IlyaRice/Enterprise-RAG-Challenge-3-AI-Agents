@@ -13,7 +13,7 @@ from infrastructure import call_llm
 from .tools import CollectedContext
 from .runtime_prompts import (
     ContextSelection,
-    system_prompt_context_builder,
+    prompt_context_builder,
 )
 from infrastructure import TaskContext
 
@@ -68,7 +68,7 @@ def run_context_builder(
     try:
         llm_result = call_llm(
             schema=ContextSelection,
-            system_prompt=system_prompt_context_builder,
+            system_prompt=prompt_context_builder,
             conversation=[{"role": "user", "content": user_message}],
             task_ctx=task_ctx,
         )

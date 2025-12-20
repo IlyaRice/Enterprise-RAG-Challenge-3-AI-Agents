@@ -1,7 +1,7 @@
 """
 ERC3 benchmark runner.
 
-Coordinates context gathering, orchestrator execution, and evaluation.
+Coordinates context gathering, agent execution, and evaluation.
 """
 
 import json
@@ -18,11 +18,11 @@ from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
 from .agent_config import AGENT_REGISTRY
 from .context_rules import run_context_builder
-from .loop import run_erc3_agent_loop
+from .loop import run_agent_loop
 from .rules import load_rules_for_session
 from .tools import (
     collect_context_blocks,
-    build_orchestrator_context,
+    build_agent_context,
     whoami_raw,
 )
 
@@ -92,7 +92,7 @@ def _build_full_erc3_context(
     base_context: str,
     selected_blocks: List[str],
 ) -> str:
-    """Combine task and context blocks for the orchestrator prompt."""
+    """Combine task and context blocks for the agent prompt."""
     parts = [
         "<task_request>",
         task_text,
@@ -186,8 +186,8 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     if config.VERBOSE:
         print(f"\nTask: {task.task_text}\n")
     
-    # Clone orchestrator config and customize system prompt
-    orchestrator_config = AGENT_REGISTRY["ERC3Orchestrator"].copy()
+    # Clone agent config and customize system prompt
+    agent_config = AGENT_REGISTRY["Agent"].copy()
     
     # Context gathering pipeline
     whoami = whoami_raw(benchmark_client)
@@ -211,7 +211,7 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
         print(f"✗ Context builder error: {e}, returning all blocks")
         selected_blocks = list(collected.blocks.keys())
     
-    base_context = build_orchestrator_context(collected, selected_blocks)
+    base_context = build_agent_context(collected, selected_blocks)
     rules = load_rules_for_session(whoami)
     
     # Load company info and format system prompt
@@ -222,7 +222,7 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
     # Load company info from wiki_meta
     company_info = _load_company_info(wiki_sha1)
     
-    system_prompt = orchestrator_config["system_prompt"].format(
+    system_prompt = agent_config["system_prompt"].format(
         company_name=company_info["company_name"],
         company_locations=", ".join(company_info["company_locations"]),
         company_execs=", ".join(company_info["company_execs"])
@@ -235,13 +235,13 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
             system_prompt = f'{system_prompt}\n\n<rules tailored_for="{user_id}">\n{rules}\n</rules>'
         else:
             system_prompt = f"{system_prompt}\n\n<rules>\n{rules}\n</rules>"
-    orchestrator_config["system_prompt"] = system_prompt
+    agent_config["system_prompt"] = system_prompt
     
     full_context = _build_full_erc3_context(task.task_text, base_context, selected_blocks)
     
     try:
-        agent_result = run_erc3_agent_loop(
-            agent_config=orchestrator_config,
+        agent_result = run_agent_loop(
+            agent_config=agent_config,
             initial_context=full_context,
             benchmark_client=benchmark_client,
             trace=trace,

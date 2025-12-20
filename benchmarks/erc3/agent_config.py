@@ -2,7 +2,7 @@
 ERC3 benchmark agent configuration.
 
 Defines:
-- AGENT_REGISTRY: Orchestrator configuration
+- AGENT_REGISTRY: Agent configuration
 - VALIDATOR_REGISTRY: Step-level validators
 - TERMINAL_ACTIONS: Terminal SDK calls (currently /respond only)
 - Helper utilities for agent/tool lookup
@@ -17,10 +17,10 @@ from erc3.erc3.dtos import (
 )
 
 from .runtime_prompts import (
-    NextStepERC3Orchestrator,
-    ERC3StepValidatorResponse,
-    system_prompt_erc3_orchestrator,
-    system_prompt_erc3_step_validator,
+    AgentStep,
+    StepValidatorResponse,
+    prompt_agent,
+    prompt_step_validator,
     Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
     Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
     Req_LoadRespondInstructions,
@@ -29,12 +29,12 @@ from .runtime_prompts import (
 # Terminal action (SDK /respond endpoint)
 TERMINAL_ACTIONS = (Req_ProvideAgentResponse,)
 
-# Primary orchestrator configuration
+# Primary agent configuration
 AGENT_REGISTRY = {
-    "ERC3Orchestrator": {
-        "name": "ERC3Orchestrator",
-        "system_prompt": system_prompt_erc3_orchestrator,
-        "schema": NextStepERC3Orchestrator,
+    "Agent": {
+        "name": "Agent",
+        "system_prompt": prompt_agent,
+        "schema": AgentStep,
         "max_steps": 40,
         "tool_type": "sdk",
     },
@@ -53,11 +53,11 @@ NON_RESPOND_TOOLS = (
 # Step validator registry (pre-execution planning guardrail)
 VALIDATOR_REGISTRY = {
     "step_validator": {
-        "name": "ERC3StepValidator",
-        "system_prompt": system_prompt_erc3_step_validator,
-        "schema": ERC3StepValidatorResponse,
+        "name": "StepValidator",
+        "system_prompt": prompt_step_validator,
+        "schema": StepValidatorResponse,
         "triggers_on_tools": NON_RESPOND_TOOLS,
-        "applies_to_agents": ("ERC3Orchestrator",),
+        "applies_to_agents": ("Agent",),
         "max_attempts": 2,
     },
 }

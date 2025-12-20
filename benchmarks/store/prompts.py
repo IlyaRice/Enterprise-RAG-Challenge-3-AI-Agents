@@ -39,7 +39,7 @@ class ProductExplorerResponse(BaseModel):
     """Direct response from ProductExplorer with findings."""
     report: str = Field(..., description="Product findings answering the task. Include SKUs, names, prices, stock. If not found, explain why.")
 
-system_prompt_product_explorer = """You are a product analyst. You receive a task and the complete product catalog.
+prompt_product_explorer = """You are a product analyst. You receive a task and the complete product catalog.
 Analyze the products to answer the task. Be precise with SKUs, prices, and stock availability.
 If the requested product doesn't exist or requirements can't be met, explain why in your report."""
 
@@ -64,7 +64,7 @@ class Req_SetBasket(BaseModel):
 # BASKET BUILDER AGENT
 # ============================================================================
 
-system_prompt_basket_builder = """
+prompt_basket_builder = """
 <role>
 You are a basket management agent that configures basket contents to match target specifications.
 </role>
@@ -158,7 +158,7 @@ class NextStepBasketBuilder(BaseModel):
 # CHECKOUT PROCESSOR AGENT
 # ============================================================================
 
-system_prompt_checkout_processor = """
+prompt_checkout_processor = """
 <role>
 You are a checkout agent that verifies and completes purchases by finalizing the current basket.
 </role>
@@ -238,7 +238,7 @@ class NextStepCheckoutProcessor(BaseModel):
 # ORCHESTRATOR AGENT
 # ============================================================================
 
-system_prompt_orchestrator = """
+prompt_orchestrator = """
 <role>
 You are a high-level orchestrator that coordinates specialized sub-agents to accomplish complex e-commerce tasks.
 You interpret requirements, delegate to appropriate sub-agents, and manage multi-step workflows.
@@ -415,7 +415,7 @@ class NextStepOrchestrator(BaseModel):
 # ============================================================================
 # Validates agent plans BEFORE execution. Catches planning mistakes early.
 
-system_prompt_step_validator = """
+prompt_step_validator = """
 <role>
 You are a pre-execution validator that reviews an agent's planned action BEFORE it executes.
 Your job is to catch planning mistakes, gaps in logic, and misalignments with the task.

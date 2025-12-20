@@ -1,9 +1,9 @@
 """
-ERC3 orchestrator execution loop.
+ERC3 agent execution loop.
 
 Contains:
-- run_erc3_step_validator and validate_and_retry_erc3_step
-- run_erc3_agent_loop: main ERC3 loop with validation and SDK execution
+- run_step_validator and validate_and_retry_step
+- run_agent_loop: main ERC3 loop with validation and SDK execution
 """
 
 import time
@@ -30,7 +30,7 @@ from .tools import execute_erc3_tools
 # ============================================================================
 
 @observe()
-def run_erc3_step_validator(
+def run_step_validator(
     validator_config: dict,
     original_task: str,
     agent_system_prompt: str,
@@ -42,7 +42,7 @@ def run_erc3_step_validator(
     trace: List[dict],
     task_ctx: TaskContext = None,
 ) -> dict:
-    """Run ERC3 StepValidator before executing a tool."""
+    """Run StepValidator before executing a tool."""
     node_id = next_node_id(parent_node_id, sibling_count)
     validator_name = validator_config["name"]
     system_prompt = validator_config["system_prompt"]
@@ -141,7 +141,7 @@ PROPOSED NEXT STEP:
         }
 
 
-def validate_and_retry_erc3_step(
+def validate_and_retry_step(
     agent_config: dict,
     schema,
     system_prompt: str,
@@ -201,12 +201,12 @@ def validate_and_retry_erc3_step(
         if not isinstance(function_to_execute, validator_config["triggers_on_tools"]):
             if current_recursion_depth >= 3:
                 return {"llm_result": current_llm_result, "step_count": current_step_count, "node_id": next_node_id(parent_node_id, current_step_count)}
-            return validate_and_retry_erc3_step(agent_config, schema, system_prompt, conversation, current_llm_result, 
+            return validate_and_retry_step(agent_config, schema, system_prompt, conversation, current_llm_result, 
                                                 original_task, parent_node_id, current_step_count, trace, task_ctx, current_recursion_depth + 1)
         
         node_id = next_node_id(parent_node_id, current_step_count)
         
-        validation = run_erc3_step_validator(
+        validation = run_step_validator(
             validator_config=validator_config,
             original_task=original_task,
             agent_system_prompt=system_prompt,
@@ -271,11 +271,11 @@ def validate_and_retry_erc3_step(
 
 
 # ============================================================================
-# ERC3 ORCHESTRATOR LOOP
+# ERC3 AGENT LOOP
 # ============================================================================
 
 @observe()
-def run_erc3_agent_loop(
+def run_agent_loop(
     agent_config: dict,
     initial_context: str,
     benchmark_client,
@@ -284,7 +284,7 @@ def run_erc3_agent_loop(
     task_ctx: TaskContext = None,
 ) -> dict:
     """
-    Run the ERC3 orchestrator agent until completion or failure.
+    Run the ERC3 agent until completion or failure.
     """
     agent_name = agent_config["name"]
     system_prompt = agent_config["system_prompt"]
@@ -305,7 +305,7 @@ def run_erc3_agent_loop(
             task_ctx=task_ctx,
         )
         
-        validation = validate_and_retry_erc3_step(
+        validation = validate_and_retry_step(
             agent_config=agent_config,
             schema=schema,
             system_prompt=system_prompt,
@@ -327,7 +327,7 @@ def run_erc3_agent_loop(
         function_to_execute = getattr(job, "function", None)
         
         if function_to_execute is None:
-            raise ValueError("ERC3 orchestrator produced a step without a function to execute.")
+            raise ValueError("Agent produced a step without a function to execute.")
         
         sdk_result = execute_erc3_tools(job, benchmark_client, task_ctx)
         

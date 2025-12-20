@@ -10,15 +10,15 @@ Contains:
 
 from .prompts import (
     # Orchestrator
-    system_prompt_orchestrator, NextStepOrchestrator,
+    prompt_orchestrator, NextStepOrchestrator,
     ProductExplorer, BasketBuilder, CheckoutProcessor,
     # Sub-agents (using consistent naming)
-    system_prompt_basket_builder, NextStepBasketBuilder,
-    system_prompt_checkout_processor, NextStepCheckoutProcessor,
+    prompt_basket_builder, NextStepBasketBuilder,
+    prompt_checkout_processor, NextStepCheckoutProcessor,
     # Terminal action
     SubmitTask,
     # Validators
-    system_prompt_step_validator, step_validator_schema,
+    prompt_step_validator, step_validator_schema,
 )
 
 
@@ -55,7 +55,7 @@ TERMINAL_ACTIONS = (SubmitTask,)
 VALIDATOR_REGISTRY = {
     "step_validator": {
         "name": "StepValidator",
-        "system_prompt": system_prompt_step_validator,
+        "system_prompt": prompt_step_validator,
         "schema": step_validator_schema,
         "triggers_on_tools": "*",  # all tools including terminals
         "applies_to_agents": ("Orchestrator",),
@@ -82,7 +82,7 @@ AGENT_REGISTRY = {
     # Orchestrator - coordinates sub-agents
     "Orchestrator": {
         "name": "Orchestrator",
-        "system_prompt": system_prompt_orchestrator,
+        "system_prompt": prompt_orchestrator,
         "schema": NextStepOrchestrator,
         "max_steps": 30,
         "tool_type": "meta",
@@ -91,7 +91,7 @@ AGENT_REGISTRY = {
     # BasketBuilder - configure basket contents and apply coupons
     "BasketBuilder": {
         "name": "BasketBuilder",
-        "system_prompt": system_prompt_basket_builder,
+        "system_prompt": prompt_basket_builder,
         "schema": NextStepBasketBuilder,
         "max_steps": 30,
         "tool_type": "sdk",
@@ -100,7 +100,7 @@ AGENT_REGISTRY = {
     # CheckoutProcessor - finalize purchases
     "CheckoutProcessor": {
         "name": "CheckoutProcessor",
-        "system_prompt": system_prompt_checkout_processor,
+        "system_prompt": prompt_checkout_processor,
         "schema": NextStepCheckoutProcessor,
         "max_steps": 30,
         "tool_type": "sdk",

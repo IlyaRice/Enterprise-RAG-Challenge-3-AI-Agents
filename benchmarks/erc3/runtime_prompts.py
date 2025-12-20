@@ -5,9 +5,9 @@ Used during task execution
 
 Contains:
 - SDK wrappers: Req_* classes for autopagination and schema fixes
-- Context builder: ContextSelection schema, system_prompt_context_builder
-- Orchestrator: NextStepERC3Orchestrator schema, system_prompt_erc3_orchestrator
-- Step validator: ERC3StepValidatorResponse schema, system_prompt_erc3_step_validator
+- Context builder: ContextSelection schema, prompt_context_builder
+- Agent: AgentStep schema, prompt_agent
+- Step validator: StepValidatorResponse schema, prompt_step_validator
 """
 
 from typing import List, Literal, Union
@@ -41,10 +41,10 @@ from erc3.erc3.dtos import (
 
 
 # ============================================================================
-# ERC3 ORCHESTRATOR - PROMPTS & SCHEMAS
+# AGENT - PROMPTS & SCHEMAS
 # ============================================================================
 
-system_prompt_erc3_orchestrator = """
+prompt_agent = """
 <role>
 You are the enterprise AI assistant for {company_name}. Every action must comply with the rules included in the conversation.
 
@@ -232,8 +232,8 @@ ERC3_SDK_TOOLS = Union[
 ]
 
 
-class NextStepERC3Orchestrator(BaseModel):
-    """Structured output for ERC3 orchestrator planning."""
+class AgentStep(BaseModel):
+    """Structured output for agent planning and execution."""
     current_state: str = Field(..., description="Summarize confirmed facts: user identity, data already retrieved, outstanding blockers.")
     remaining_work: List[str] = Field(..., description="Numbered plan (<=5 items) from current state to completion. Update as progress is made.")
     next_action: str = Field(..., description="Describe what to do next and why it moves the plan forward.")
@@ -246,7 +246,7 @@ class NextStepERC3Orchestrator(BaseModel):
 # ============================================================================
 # Selects relevant context blocks for the task.
 
-system_prompt_context_builder = """
+prompt_context_builder = """
 <role>
 You are a context selection assistant. Your job is to identify which context blocks are relevant to the user's task.
 </role>
@@ -299,9 +299,9 @@ class ContextSelection(BaseModel):
 # STEP VALIDATOR PROMPT & SCHEMA
 # ============================================================================
 
-system_prompt_erc3_step_validator = """
+prompt_step_validator = """
 <role>
-You validate the ERC3 orchestrator's next step before it runs. Stop rule violations, missing prerequisites, or premature completion.
+You validate the agent's next step before it runs. Stop rule violations, missing prerequisites, or premature completion.
 </role>
 
 <what_you_receive>
@@ -325,8 +325,8 @@ You validate the ERC3 orchestrator's next step before it runs. Stop rule violati
 """
 
 
-class ERC3StepValidatorResponse(BaseModel):
-    """Validator response for ERC3 planning checks."""
+class StepValidatorResponse(BaseModel):
+    """Validator response for planning checks."""
     analysis: str = Field(..., description="Brief reasoning about the plan's strengths/weaknesses.")
     is_valid: bool = Field(..., description="True if the plan is safe to execute.")
     rejection_message: str = Field(default="", description="Actionable feedback when rejecting.")
