@@ -21,7 +21,7 @@ from infrastructure import (
     inject_plan,
     next_node_id,
 )
-from .agent_config import VALIDATOR_REGISTRY, is_terminal_action
+from .config import VALIDATOR_REGISTRY, is_terminal_action
 from .tools import execute_erc3_tools
 
 
@@ -369,3 +369,4 @@ def run_agent_loop(
             }
     
     raise AgentStepLimitError(f"Agent {agent_name} exceeded {max_steps} steps without completing.")
+

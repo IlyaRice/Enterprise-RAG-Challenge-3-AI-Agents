@@ -21,8 +21,13 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from benchmarks.erc3.wiki import ingest_wikis, export_specs_info, get_wiki_data_path, index_wiki_files
-from benchmarks.erc3.rules import extract_all_rules
+from benchmarks.erc3.ingestion import (
+    ingest_wikis,
+    export_specs_info,
+    get_wiki_data_path,
+    index_wiki_files,
+    extract_all_rules,
+)
 
 
 # Known ERC3 benchmark variants
@@ -216,4 +221,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

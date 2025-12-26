@@ -330,3 +330,4 @@ class StepValidatorResponse(BaseModel):
     analysis: str = Field(..., description="Brief reasoning about the plan's strengths/weaknesses.")
     is_valid: bool = Field(..., description="True if the plan is safe to execute.")
     rejection_message: str = Field(default="", description="Actionable feedback when rejecting.")
+

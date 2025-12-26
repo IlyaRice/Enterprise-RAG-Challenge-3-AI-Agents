@@ -16,7 +16,7 @@ from erc3.erc3.dtos import (
     Req_TimeSummaryByEmployee, Req_TimeSummaryByProject,
 )
 
-from .runtime_prompts import (
+from .prompts import (
     AgentStep,
     StepValidatorResponse,
     prompt_agent,
@@ -66,3 +66,4 @@ VALIDATOR_REGISTRY = {
 def is_terminal_action(function) -> bool:
     """Return True if the function is a terminal /respond call."""
     return isinstance(function, TERMINAL_ACTIONS)
+

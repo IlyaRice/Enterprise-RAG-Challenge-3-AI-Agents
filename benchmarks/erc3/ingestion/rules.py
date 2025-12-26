@@ -5,24 +5,18 @@ Extracts rules from wiki files at ingestion time, saving them as markdown files.
 Uses extraction + validation loop pattern.
 
 Usage:
-    from benchmarks.erc3.rules import extract_all_rules, load_rules
+    from benchmarks.erc3.ingestion import extract_all_rules
     
     # At ingestion time:
     extract_all_rules(wiki_dir)  # Creates rules/public.md and rules/authenticated.md
-    
-    # At runtime:
-    rules = load_rules(wiki_dir, "public")  # Returns markdown string or None
 """
 
 import json
 from pathlib import Path
 from typing import List
 
-import yaml
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from infrastructure import call_llm
-from .ingestion_prompts import (
+from .prompts import (
     FileExtraction, ExtractedRulesResponse, ValidatorResponse,
     RespondRuleExtraction,
     prompt_public_rules_extractor, prompt_authenticated_rules_extractor, 
@@ -111,6 +105,8 @@ def _format_respond_rules(extraction: 'RespondRuleExtraction') -> str:
         parts.append("(No general constraints were found in the wiki files)")
     
     return "\n".join(parts)
+
+
 def _extract_with_validation(wiki_content: str, extraction_prompt: str, max_attempts: int = 4) -> List[FileExtraction]:
     """Core extraction + validation loop."""
     original_user_message = f"Extract all relevant content from the following wiki files:\n\n{wiki_content}"
@@ -196,52 +192,6 @@ def extract_rules_for_category(wiki_dir: str, category: str, max_attempts: int =
     return _format_result(files) if files else ""
 
 
-def extract_all_rules(wiki_dir: str, max_attempts: int = 4) -> dict:
-    """Extract rules for all categories and save to rules/ folder."""
-    wiki_path = Path(wiki_dir)
-    rules_dir = wiki_path / "rules"
-    rules_dir.mkdir(exist_ok=True)
-    
-    result = {}
-    
-    # Extract public and authenticated rules
-    for category in ["public", "authenticated"]:
-        print(f"\n{'='*50}")
-        print(f"Category: {category}")
-        print('='*50)
-        
-        content = extract_rules_for_category(wiki_dir, category, max_attempts)
-        if content:
-            file_path = rules_dir / f"{category}.md"
-            file_path.write_text(content, encoding="utf-8")
-            result[category] = str(file_path)
-            print(f"  Saved to {file_path}")
-        else:
-            print(f"  No rules extracted for {category}")
-    
-    # Extract respond rules (unified for all users)
-    print(f"\n{'='*50}")
-    print(f"Category: respond")
-    print('='*50)
-    
-    respond_content = extract_respond_rules(wiki_dir, max_attempts)
-    if respond_content:
-        file_path = rules_dir / "respond_struct.md"
-        file_path.write_text(respond_content, encoding="utf-8")
-        result["respond"] = str(file_path)
-        print(f"  Saved to {file_path}")
-    else:
-        print(f"  No rules extracted for respond")
-    
-    return result
-
-
-def load_rules(wiki_dir: str, category: str) -> str | None:
-    """Load pre-extracted rules at runtime."""
-    rules_path = Path(wiki_dir) / "rules" / f"{category}.md"
-    return rules_path.read_text(encoding="utf-8") if rules_path.exists() else None
-
-
 def extract_respond_rules(wiki_dir: str, max_attempts: int = 4) -> str:
     """Extract categorized respond tool rules from wiki files with specified tags."""
     wiki_content = _load_rule_files(wiki_dir, tags=["agent_directive", "agent_reference"])
@@ -317,34 +267,42 @@ Address this feedback and try again."""
     return _format_respond_rules(last_result) if last_result else ""
 
 
-def load_respond_rules_for_session(whoami: dict) -> str:
-    """Load pre-extracted respond rules (unified for all users)."""
-    if whoami.get("error") or not whoami.get("wiki_sha1"):
-        return ""
+def extract_all_rules(wiki_dir: str, max_attempts: int = 4) -> dict:
+    """Extract rules for all categories and save to rules/ folder."""
+    wiki_path = Path(wiki_dir)
+    rules_dir = wiki_path / "rules"
+    rules_dir.mkdir(exist_ok=True)
     
-    wiki_dir = Path(__file__).parent / "wiki_data" / whoami["wiki_sha1"][:8]
-    rules_path = wiki_dir / "rules" / "respond_struct.md"
+    result = {}
     
-    return rules_path.read_text(encoding="utf-8") if rules_path.exists() else ""
+    # Extract public and authenticated rules
+    for category in ["public", "authenticated"]:
+        print(f"\n{'='*50}")
+        print(f"Category: {category}")
+        print('='*50)
+        
+        content = extract_rules_for_category(wiki_dir, category, max_attempts)
+        if content:
+            file_path = rules_dir / f"{category}.md"
+            file_path.write_text(content, encoding="utf-8")
+            result[category] = str(file_path)
+            print(f"  Saved to {file_path}")
+        else:
+            print(f"  No rules extracted for {category}")
+    
+    # Extract respond rules (unified for all users)
+    print(f"\n{'='*50}")
+    print(f"Category: respond")
+    print('='*50)
+    
+    respond_content = extract_respond_rules(wiki_dir, max_attempts)
+    if respond_content:
+        file_path = rules_dir / "respond_struct.md"
+        file_path.write_text(respond_content, encoding="utf-8")
+        result["respond"] = str(file_path)
+        print(f"  Saved to {file_path}")
+    else:
+        print(f"  No rules extracted for respond")
+    
+    return result
 
-
-def load_rules_for_session(whoami: dict) -> str:
-    """
-    Load pre-extracted rules based on session context.
-    
-    For public users: loads public rules.
-    For authenticated users: loads authenticated rules.
-    
-    Args:
-        whoami: Result from whoami_raw() containing wiki_sha1, is_public
-    
-    Returns:
-        Rules content as string, or empty string if not available
-    """
-    wiki_sha1 = whoami.get("wiki_sha1", "")
-    if not wiki_sha1 or whoami.get("error"):
-        return ""
-    
-    wiki_dir = Path(__file__).parent / "wiki_data" / wiki_sha1[:8]
-    category = "public" if whoami.get("is_public", True) else "authenticated"
-    return load_rules(str(wiki_dir), category) or ""

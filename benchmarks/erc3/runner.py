@@ -16,14 +16,14 @@ from erc3.erc3.dtos import Req_ProvideAgentResponse, Req_ListWiki
 
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
 
-from .agent_config import AGENT_REGISTRY
-from .context_rules import run_context_builder
-from .loop import run_agent_loop
-from .rules import load_rules_for_session
-from .tools import (
+from .runtime import (
+    AGENT_REGISTRY,
+    run_agent_loop,
+    run_context_builder,
     collect_context_blocks,
     build_agent_context,
     whoami_raw,
+    load_rules_for_session,
 )
 
 
@@ -252,4 +252,3 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
         return _handle_timeout(benchmark_client, task, erc_client, trace, task.benchmark or "erc3")
     
     return _complete_and_format_result(task, erc_client, trace, agent_result, task.benchmark or "erc3")
-

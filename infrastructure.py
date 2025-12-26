@@ -294,9 +294,8 @@ def call_llm(
         messages.append({"role": msg["role"], "content": msg["content"]})
             
     response_format = type_to_response_format_param(schema)
-    
     # Retry logic for rare LLM failures
-    for attempt in range(4):
+    for attempt in range(6):
         try:
             llm_start = time.time()
             
@@ -328,8 +327,8 @@ def call_llm(
             }
             
         except Exception as e:
-            if attempt < 3:
-                print(f"  ⚠ Retry {attempt + 1}/3 (error: {type(e).__name__})")
+            if attempt < 5:
+                print(f"  ⚠ Retry {attempt + 1}/5 (error: {type(e).__name__})")
                 time.sleep(0.5)
             else:
                 raise

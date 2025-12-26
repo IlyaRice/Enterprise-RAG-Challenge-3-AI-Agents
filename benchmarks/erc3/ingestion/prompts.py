@@ -326,3 +326,4 @@ class WikiIndexResponse(BaseModel):
     """Response from wiki indexer LLM."""
     files: List[IndexedFile] = Field(..., description="Metadata for each wiki file")
     company: CompanyInfo = Field(..., description="Company basic info extracted from wiki files")
+

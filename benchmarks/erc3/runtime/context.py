@@ -1,44 +1,41 @@
 """
-ERC3 benchmark SDK tool execution and context gathering.
+ERC3 context gathering, wiki search, and rule loading.
 
 Contains:
-- Pagination: _paginate (generic)
+- Data structures: ContextBlock, CollectedContext
+- Pagination: _paginate
 - Directory formatters: format_employees_list, format_customers_list, format_projects_list
 - Context gathering: whoami_raw, format_whoami, employee_raw, format_employee
-- Wiki search: search_wiki, format_wiki_search (BM25 + fuzzy hybrid)
+- User data: user_projects_raw, user_customers_raw, user_time_entries_raw
 - Context blocks: collect_context_blocks, build_agent_context
-- SDK execution: execute_single_call, execute_erc3_tools
-
-Uses shared execute_sdk_call from infrastructure for core SDK dispatch.
+- Wiki search: search_wiki, format_wiki_search (BM25 + fuzzy hybrid)
+- Rule loading: load_rules, load_rules_for_session, load_respond_rules_for_session
+- Context builder: run_context_builder
 """
 
-import json
 import re
-import yaml
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
+import yaml
 from rank_bm25 import BM25Okapi
 from rapidfuzz import fuzz
+from langfuse import observe
 
 from erc3.erc3.dtos import (
     Req_WhoAmI, Req_GetEmployee, Req_GetCustomer, Req_GetProject, ProjectTeamFilter,
-    Req_ListEmployees, Req_SearchEmployees, Req_ListCustomers, Req_SearchCustomers,
-    Req_ListProjects, Req_SearchProjects, Req_SearchTimeEntries, Req_LogTimeEntry,
+    Req_ListEmployees, Req_SearchCustomers, Req_SearchProjects, Req_SearchTimeEntries,
 )
-from infrastructure import execute_sdk_call, dispatch_with_retry
-# Import wrappers (LLM-facing, no limit/offset) - shadowing is OK, they're used in different contexts
-import benchmarks.erc3.runtime_prompts as erc3_prompts
-from .rules import load_respond_rules_for_session
+from infrastructure import dispatch_with_retry, call_llm, TaskContext
+
+from .prompts import ContextSelection, prompt_context_builder
 
 
 # ============================================================================
 # DATA STRUCTURES FOR CONTEXT BLOCKS
 # ============================================================================
-
-from dataclasses import dataclass, field
-from typing import Dict, List
-
 
 @dataclass
 class ContextBlock:
@@ -991,139 +988,116 @@ def build_agent_context(
 
 
 # ============================================================================
-# SDK TOOL EXECUTION
+# RULE LOADING (Runtime)
 # ============================================================================
 
-def execute_single_call(function, benchmark_client, task_ctx=None) -> dict:
+def load_rules(wiki_dir: str, category: str) -> str | None:
+    """Load pre-extracted rules at runtime."""
+    rules_path = Path(wiki_dir) / "rules" / f"{category}.md"
+    return rules_path.read_text(encoding="utf-8") if rules_path.exists() else None
+
+
+def load_respond_rules_for_session(whoami: dict) -> str:
+    """Load pre-extracted respond rules (unified for all users)."""
+    if whoami.get("error") or not whoami.get("wiki_sha1"):
+        return ""
+    
+    wiki_dir = Path(__file__).parent.parent / "wiki_data" / whoami["wiki_sha1"][:8]
+    rules_path = wiki_dir / "rules" / "respond_struct.md"
+    
+    return rules_path.read_text(encoding="utf-8") if rules_path.exists() else ""
+
+
+def load_rules_for_session(whoami: dict) -> str:
     """
-    Execute a single SDK tool call for ERC3 benchmark.
+    Load pre-extracted rules based on session context.
+    
+    For public users: loads public rules.
+    For authenticated users: loads authenticated rules.
     
     Args:
-        function: SDK request object or custom wrapper tool
-        benchmark_client: SDK client for API calls
-        task_ctx: TaskContext for internal tools needing whoami
+        whoami: Result from whoami_raw() containing wiki_sha1, is_public
     
     Returns:
-        dict with "text" and "tool_call"
+        Rules content as string, or empty string if not available
     """
-    # Internal tool: Load respond instructions
-    if isinstance(function, erc3_prompts.Req_LoadRespondInstructions):
-        whoami = task_ctx.whoami if task_ctx else None
-        rules = load_respond_rules_for_session(whoami) if whoami else ""
-        text = f"<respond_instructions>\n{rules or '(No respond instructions found)'}\n</respond_instructions>"
-        return {"text": text, "tool_call": {"request": {}, "response": {"loaded": bool(rules)}}}
+    wiki_sha1 = whoami.get("wiki_sha1", "")
+    if not wiki_sha1 or whoami.get("error"):
+        return ""
     
-    # Wrapper: Log time entry (field ordering fix)
-    if isinstance(function, erc3_prompts.Req_LogTimeEntry):
-        function = Req_LogTimeEntry(**function.model_dump())
-    
-    # Wrappers: List endpoints (autopaginated, formatted as directories)
-    elif isinstance(function, erc3_prompts.Req_ListEmployees):
-        result = _paginate(benchmark_client, Req_ListEmployees, "employees")
-        formatted = format_employees_list(result)
-        return {
-            "text": formatted,
-            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
-        }
-    
-    elif isinstance(function, erc3_prompts.Req_ListCustomers):
-        result = _paginate(benchmark_client, Req_ListCustomers, "companies")
-        formatted = format_customers_list(result)
-        return {
-            "text": formatted,
-            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
-        }
-    
-    elif isinstance(function, erc3_prompts.Req_ListProjects):
-        result = _paginate(benchmark_client, Req_ListProjects, "projects")
-        formatted = format_projects_list(result)
-        return {
-            "text": formatted,
-            "tool_call": {"request": {}, "response": {"count": len(result["items"])}}
-        }
-    
-    # Wrappers: Search endpoints (autopaginated with filters)
-    elif isinstance(function, erc3_prompts.Req_SearchEmployees):
-        params = function.model_dump(exclude={'tool'})
-        result = _paginate(
-            benchmark_client,
-            lambda offset, limit: Req_SearchEmployees(**params, offset=offset, limit=limit),
-            "employees"
-        )
-        response_dict = {"employees": result["items"]}
-        if not result["complete"] and result["errors"]:
-            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
-        return {
-            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
-            "tool_call": {"request": params, "response": response_dict}
-        }
-    
-    elif isinstance(function, erc3_prompts.Req_SearchCustomers):
-        params = function.model_dump(exclude={'tool'})
-        result = _paginate(
-            benchmark_client,
-            lambda offset, limit: Req_SearchCustomers(**params, offset=offset, limit=limit),
-            "companies"
-        )
-        response_dict = {"companies": result["items"]}
-        if not result["complete"] and result["errors"]:
-            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
-        return {
-            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
-            "tool_call": {"request": params, "response": response_dict}
-        }
-    
-    elif isinstance(function, erc3_prompts.Req_SearchProjects):
-        params = function.model_dump(exclude={'tool'})
-        result = _paginate(
-            benchmark_client,
-            lambda offset, limit: Req_SearchProjects(**params, offset=offset, limit=limit),
-            "projects"
-        )
-        response_dict = {"projects": result["items"]}
-        if not result["complete"] and result["errors"]:
-            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
-        return {
-            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
-            "tool_call": {"request": params, "response": response_dict}
-        }
-    
-    elif isinstance(function, erc3_prompts.Req_SearchTimeEntries):
-        params = function.model_dump(exclude={'tool'})
-        result = _paginate(
-            benchmark_client,
-            lambda offset, limit: Req_SearchTimeEntries(**params, offset=offset, limit=limit),
-            "entries"
-        )
-        response_dict = {"entries": result["items"]}
-        # Capture summary fields from first item's response (they're global totals from server)
-        if result["items"] and result["complete"]:
-            # Make one call to get summaries
-            try:
-                resp = dispatch_with_retry(benchmark_client, Req_SearchTimeEntries(**params, offset=0, limit=1))
-                if hasattr(resp, 'total_hours'):
-                    response_dict['total_hours'] = resp.total_hours
-                    response_dict['total_billable'] = resp.total_billable
-                    response_dict['total_non_billable'] = resp.total_non_billable
-            except:
-                pass
-        if not result["complete"] and result["errors"]:
-            response_dict["error"] = f"Incomplete: {result['errors'][0]}"
-        return {
-            "text": json.dumps(response_dict, indent=2, ensure_ascii=False),
-            "tool_call": {"request": params, "response": response_dict}
-        }
-    
-    # Standard SDK dispatch via shared infrastructure
-    return execute_sdk_call(function, benchmark_client)
+    wiki_dir = Path(__file__).parent.parent / "wiki_data" / wiki_sha1[:8]
+    category = "public" if whoami.get("is_public", True) else "authenticated"
+    return load_rules(str(wiki_dir), category) or ""
 
 
 # ============================================================================
-# MAIN ENTRY POINT
+# CONTEXT BUILDER (LLM-based block selection)
 # ============================================================================
 
-def execute_erc3_tools(job, benchmark_client, task_ctx=None) -> dict:
-    """Execute SDK tool for ERC3 benchmark. Returns dict with text, tool_calls, function."""
-    function = job.function
-    result = execute_single_call(function, benchmark_client, task_ctx)
-    return {"text": result["text"], "tool_calls": [result["tool_call"]], "function": function}
+@observe()
+def run_context_builder(
+    task_text: str,
+    collected: CollectedContext,
+    task_ctx: TaskContext = None,
+    **_lf: Any,  # Langfuse kwargs for thread context propagation
+) -> List[str]:
+    """
+    Run context builder to select relevant blocks for a task.
+    
+    Args:
+        task_text: The user's task text
+        collected: CollectedContext from collect_context_blocks()
+        task_ctx: TaskContext for logging LLM usage
+    
+    Returns:
+        List of selected block names (empty for public users)
+    """
+    # Skip LLM call for public users - no blocks to choose from
+    if not collected.blocks:
+        return []
+    
+    # Build user message with all context
+    parts = ["<session_content>", collected.session_content, "</session_content>"]
+    
+    if collected.employee_content:
+        parts.append("\n<employee_profile>")
+        parts.append(collected.employee_content)
+        parts.append("</employee_profile>")
+    
+    parts.append("\n<available_content_blocks>")
+    for block in collected.blocks.values():
+        parts.append(block.content)
+    parts.append("</available_content_blocks>")
+    
+    # Add recap of all block IDs for easy reference
+    parts.append("\n<block_ids_to_choose_from>")
+    parts.append("\n".join(collected.blocks.keys()))
+    parts.append("</block_ids_to_choose_from>")
+    
+    parts.append("\n<task>")
+    parts.append(task_text)
+    parts.append("</task>")
+    
+    user_message = "\n".join(parts)
+    
+    # Call LLM
+    try:
+        llm_result = call_llm(
+            schema=ContextSelection,
+            system_prompt=prompt_context_builder,
+            conversation=[{"role": "user", "content": user_message}],
+            task_ctx=task_ctx,
+        )
+        
+        parsed = llm_result["parsed"]
+        
+        # Filter to only valid block names
+        valid_blocks = [b for b in parsed.selected_blocks if b in collected.blocks]
+        
+        return valid_blocks
+        
+    except Exception as e:
+        # On error, return all blocks (fail-safe)
+        print(f"✗ Context builder error: {e}, returning all blocks")
+        return list(collected.blocks.keys())
+

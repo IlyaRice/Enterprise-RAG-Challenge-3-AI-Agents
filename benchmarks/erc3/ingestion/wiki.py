@@ -5,14 +5,11 @@ Downloads and caches wiki files for erc3, erc3-dev, and erc3-test benchmarks.
 Wikis are stored in wiki_data/{sha1_prefix}/ - shared across benchmarks since
 wikis with the same SHA are identical regardless of which benchmark uses them.
 
-Also provides benchmark metadata export for development reference.
-
 Usage:
-    from benchmarks.erc3.wiki import ingest_wikis, index_wiki_files, export_specs_info
+    from benchmarks.erc3.ingestion import ingest_wikis, index_wiki_files, get_wiki_data_path
     
     ingest_wikis("erc3-dev")       # Download erc3-dev wikis
     index_wiki_files(wiki_dir)     # Index files with metadata
-    export_specs_info("erc3-dev")  # Export specs to docs/erc3/
 """
 
 import json
@@ -21,18 +18,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import config
 from erc3 import ERC3, TaskInfo
-from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI, Req_ListEmployees, Req_GetEmployee
+from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI
 from langfuse import observe
 from infrastructure import call_llm
-from .ingestion_prompts import WikiIndexResponse, ValidatorResponse, prompt_wiki_indexer, prompt_extraction_validator
-from .tools import _paginate
-import config
+from .prompts import WikiIndexResponse, ValidatorResponse, prompt_wiki_indexer, prompt_extraction_validator
 
 # Path to wiki data directory (relative to this file)
-WIKI_DATA_DIR = Path(__file__).parent / "wiki_data"
-
-# Path to docs directory (project root)
-DOCS_DIR = Path(__file__).parent.parent.parent / "docs" / "erc3"
+WIKI_DATA_DIR = Path(__file__).parent.parent / "wiki_data"
 
 
 def get_wiki_data_path(sha1_prefix: str = None) -> Path:
@@ -233,72 +225,6 @@ def ingest_wikis(benchmark_name: str):
             print(f"  ✗ Error downloading wiki {hash_prefix}: {str(e)}")
     
     print(f"\n✓ Completed! Downloaded {downloaded_count} new, updated {updated_count} existing")
-
-
-def export_specs_info(benchmark_name: str) -> Path:
-    """
-    Export benchmark specs info to a markdown file for development reference.
-    
-    Creates a human-readable markdown file with all task specs, including:
-    - Task index and ID
-    - Task description
-    - Gotcha/hints (if any)
-    - Available API routes
-    
-    Args:
-        benchmark_name: Name of the benchmark (e.g., "erc3-dev", "erc3-test", "erc3")
-    
-    Returns:
-        Path to the created markdown file
-    """
-    # Validate benchmark name
-    if not benchmark_name.startswith("erc3"):
-        raise ValueError(f"Specs export only supports erc3* benchmarks, got: {benchmark_name}")
-    
-    # Initialize ERC3 client and get benchmark info
-    core = ERC3(key=config.ERC3_API_KEY)
-    info = core.view_benchmark(benchmark_name)
-    
-    # Build markdown content
-    lines = [
-        f"# {benchmark_name} Specs",
-        "",
-        f"**Benchmark ID:** {info.id}",
-        f"**Description:** {info.description}",
-        f"**Status:** {info.status}",
-        f"**Total Tasks:** {len(info.specs)}",
-        "",
-        "---",
-        "",
-        "## Tasks",
-        "",
-    ]
-    
-    for i, spec in enumerate(info.specs):
-        lines.append(f"### Task {i}: {spec.id}")
-        lines.append("")
-        lines.append(f"**Task:** {spec.task}")
-        if spec.gotcha:
-            lines.append(f"")
-            lines.append(f"**Gotcha:** {spec.gotcha}")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-    
-    # Add API routes section
-    lines.append("## Available API Routes")
-    lines.append("")
-    for route in info.routes:
-        lines.append(f"- `{route.path}`: {route.description}")
-    lines.append("")
-    
-    # Write to file
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = DOCS_DIR / f"{benchmark_name}_specs.md"
-    output_path.write_text("\n".join(lines), encoding="utf-8")
-    
-    print(f"✓ Specs exported to {output_path}")
-    return output_path
 
 
 # ============================================================================

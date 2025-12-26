@@ -332,7 +332,7 @@ def _run_session(
             # Print immediately as task completes
             status_icon = "✓" if result.get("score") == 1.0 else "✗"
             logs = f"\n  {result['eval_logs']}" if result.get("eval_logs") else ""
-            print(f"{status_icon} Task #{task.num+1}: {task.task_text[:60]}\n  Score: {result.get('score', 'N/A')}{logs}")
+            print(f"{status_icon} Task #{task.num+1}: {task.task_text}\n  Score: {result.get('score', 'N/A')}{logs}")
     
     erc.submit_session(session_id)
     
