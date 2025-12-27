@@ -13,7 +13,6 @@ if os.environ.get("LANGFUSE_TRACING_ENABLED") == "0":
     os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
     logging.getLogger("langfuse").disabled = True
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 ERC3_API_KEY = os.getenv("ERC3_API_KEY")

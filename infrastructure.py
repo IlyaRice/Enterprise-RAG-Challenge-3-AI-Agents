@@ -79,15 +79,24 @@ class TaskContext:
 # ============================================================================
 # OPENAI CLIENT INITIALIZATION
 # ============================================================================
-# Single place for LLM client setup. Easy to change provider/model globally.
 
-client = OpenAI(
-    base_url="https://api.cerebras.ai/v1",
-    api_key=config.CEREBRAS_API_KEY
-)
+if config.CEREBRAS_API_KEY:
+    client = OpenAI(
+        base_url="https://api.cerebras.ai/v1",
+        api_key=config.CEREBRAS_API_KEY
+    )
+    LLM_MODEL = "gpt-oss-120b"
+    USE_OPENROUTER = False
+elif config.OPENROUTER_API_KEY:
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=config.OPENROUTER_API_KEY
+    )
+    LLM_MODEL = "openai/gpt-oss-120b"
+    USE_OPENROUTER = True
+else:
+    raise ValueError("Either CEREBRAS_API_KEY or OPENROUTER_API_KEY must be set")
 
-# Model configuration - change here to affect all LLM calls
-LLM_MODEL = "gpt-oss-120b"
 LLM_MODEL_LOG_NAME = "openai/gpt-oss-120b"  # For SDK logs and traces
 
 
@@ -301,12 +310,16 @@ def call_llm(
             
             lf = get_client()
             with lf.start_as_current_observation(name="llm-call") as gen:
-                response = client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=messages,
-                    response_format=response_format,
-                    reasoning_effort=reasoning_effort,
-                )
+                kwargs = {
+                    "model": LLM_MODEL,
+                    "messages": messages,
+                    "response_format": response_format,
+                    "reasoning_effort": reasoning_effort,
+                }
+                if USE_OPENROUTER:
+                    kwargs["extra_body"] = {"provider": {"order": ["Cerebras", "Groq"]}}
+                
+                response = client.chat.completions.create(**kwargs)
 
                 reasoning = getattr(response.choices[0].message, 'reasoning', None)
                 gen.update(metadata={"reasoning": reasoning, "attempt": attempt + 1})
