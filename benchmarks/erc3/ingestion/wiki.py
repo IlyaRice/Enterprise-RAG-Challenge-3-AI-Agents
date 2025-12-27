@@ -16,12 +16,12 @@ import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import config
 from erc3 import ERC3, TaskInfo
 from erc3.erc3.dtos import Req_ListWiki, Req_LoadWiki, Req_WhoAmI
 from langfuse import observe
 from infrastructure import call_llm
 from .prompts import WikiIndexResponse, ValidatorResponse, prompt_wiki_indexer, prompt_extraction_validator
+import config
 
 # Path to wiki data directory (relative to this file)
 WIKI_DATA_DIR = Path(__file__).parent.parent / "wiki_data"

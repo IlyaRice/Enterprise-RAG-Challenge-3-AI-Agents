@@ -10,11 +10,11 @@ from typing import List
 
 from langfuse import get_client, observe
 
-import config
 from erc3 import ERC3, TaskInfo
 from erc3.erc3.dtos import Req_ProvideAgentResponse, Req_ListWiki
 
 from infrastructure import AgentStepLimitError, TaskContext, LLM_MODEL_LOG_NAME
+import config
 
 from .runtime import (
     AGENT_REGISTRY,

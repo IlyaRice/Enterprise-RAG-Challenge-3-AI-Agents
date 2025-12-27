@@ -1,3 +1,4 @@
+import logging
 import os
 from dotenv import dotenv_values, load_dotenv
 
@@ -6,6 +7,12 @@ env_file_values = dotenv_values()
 should_override = env_file_values.get("LOCAL_DEV") == "1"
 
 load_dotenv(override=should_override)
+
+if os.environ.get("LANGFUSE_TRACING_ENABLED") == "0":
+    os.environ.pop("LANGFUSE_SECRET_KEY", None)
+    os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
+    logging.getLogger("langfuse").disabled = True
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")

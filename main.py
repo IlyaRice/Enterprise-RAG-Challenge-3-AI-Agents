@@ -15,8 +15,8 @@ MODE OVERVIEW:
 
 import argparse
 import sys
-import config
 from erc_utilities import repeat_tasks, create_and_run_session, TaskResult, RunResult
+import config
 
 # Task definitions for each benchmark
 BENCHMARK_TASKS = {

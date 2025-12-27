@@ -10,7 +10,6 @@ Entry point for store benchmark execution. Handles:
 from typing import List
 from langfuse import get_client, observe
 
-import config
 from erc3 import TaskInfo, ERC3
 
 # Import from universal infrastructure
@@ -28,6 +27,7 @@ from .agent_config import AGENT_REGISTRY
 from .prompts import SubmitTask
 from .tools import execute_store_tools
 
+import config
 
 # ============================================================================
 # INTERNAL HELPERS

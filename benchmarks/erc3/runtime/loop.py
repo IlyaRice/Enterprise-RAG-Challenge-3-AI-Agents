@@ -11,7 +11,6 @@ from typing import List
 
 from langfuse import observe
 
-import config
 from infrastructure import (
     AgentStepLimitError,
     TaskContext,
@@ -23,6 +22,7 @@ from infrastructure import (
 )
 from .config import VALIDATOR_REGISTRY, is_terminal_action
 from .tools import execute_erc3_tools
+import config
 
 
 # ============================================================================

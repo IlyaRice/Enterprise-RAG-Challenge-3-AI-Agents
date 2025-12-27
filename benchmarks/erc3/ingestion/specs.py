@@ -11,8 +11,8 @@ Usage:
 
 from pathlib import Path
 
-import config
 from erc3 import ERC3
+import config
 
 # Path to docs directory (project root)
 DOCS_DIR = Path(__file__).parent.parent.parent.parent / "docs" / "erc3"

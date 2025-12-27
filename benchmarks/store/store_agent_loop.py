@@ -10,7 +10,6 @@ import time
 from typing import List, Callable
 from langfuse import observe
 
-import config
 from infrastructure import (
     # LLM
     call_llm,
@@ -39,6 +38,7 @@ from benchmarks.store.prompts import (
 )
 from benchmarks.store.tools import execute_get_all_products, execute_store_tools
 
+import config
 
 # ============================================================================
 # VALIDATORS

@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 import yaml
 from rank_bm25 import BM25Okapi
 from rapidfuzz import fuzz
+
 from langfuse import observe
 
 from erc3.erc3.dtos import (
@@ -31,7 +32,7 @@ from erc3.erc3.dtos import (
 from infrastructure import dispatch_with_retry, call_llm, TaskContext
 
 from .prompts import ContextSelection, prompt_context_builder
-
+import config
 
 # ============================================================================
 # DATA STRUCTURES FOR CONTEXT BLOCKS
