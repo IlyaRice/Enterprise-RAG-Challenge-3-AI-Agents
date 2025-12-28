@@ -21,15 +21,6 @@ If you're looking for production-ready code, this isn't it. But if you want to e
 
 **[Installation Guide](docs/installation.md)** - Setup instructions, API configuration, and trace visualizer setup
 
-## Benchmark Support
-
-This implementation supports all ERC3 benchmark variants:
-
-- `store` - E-commerce agent (15 tasks)
-- `erc3-dev` - Development benchmark (16 tasks)
-- `erc3-test` - Test benchmark (24 tasks)
-- `erc3-prod` - Production benchmark (103 tasks)
-
 ## Usage
 
 Available benchmarks: `store`, `erc3-dev`, `erc3-test`, `erc3-prod`

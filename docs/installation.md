@@ -5,6 +5,7 @@
 - pip (Python package installer)
 - ERC3 API key (get it at https://erc.timetoact-group.at/)
 - LLM provider API key (OpenRouter or Cerebras)
+- Node.js v18 or higher (optional - only for trace visualizer)
 
 ## Setup
 
@@ -69,9 +70,6 @@ Expected output: Task execution with detailed logs (verbose mode), ending with s
 
 The repository includes an interactive web-based tool for visualizing agent execution traces.
 
-### Prerequisites
-- Node.js (v18 or higher)
-
 ### Installation
 
 ```bash
@@ -86,4 +84,6 @@ cd trace-viewer
 npm run dev
 ```
 
-Open http://localhost:3000 and use the file browser to load trace files from the `traces/` directory.
+Open http://localhost:3000 in your browser. 
+
+**Browser compatibility:** The directory picker feature requires Chrome, Edge, or Opera. If you're using a different browser, use the "Upload Run" button in the header to load individual trace JSON files from the `traces/` directory.
