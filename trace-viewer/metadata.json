@@ -1,0 +1,5 @@
+{
+  "name": "AI Agent Trace Visualizer",
+  "description": "An interactive tree visualization tool for exploring and debugging AI agent execution traces.",
+  "requestFramePermissions": []
+}

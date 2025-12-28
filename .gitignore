@@ -6,6 +6,11 @@ traces/
 .cursor/
 .cursorignore
 .cursorindexingignore
+# Node / Frontend
+node_modules
+dist
+dist-ssr
+*.local
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
