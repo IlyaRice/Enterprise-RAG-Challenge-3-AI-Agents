@@ -13,13 +13,14 @@ This is competition code - it works, but has rough edges. A few things to know:
 - The ERC3 API integration is competition-specific (you'll need your own ERC3 API key for access to the benchmark platform)
 - You'll need API keys for OpenRouter/Cerebras
 - Some features are implemented but not used (looking at you, overengineered wiki search)
-- The trace visualizer requires Node.js and npm (but it's optional)
 
 If you're looking for production-ready code, this isn't it. But if you want to explore agent architectures and their implementation - dive in!
 
 ## Getting Started
 
-**[Installation Guide](docs/installation.md)** - Setup instructions, API configuration, and trace visualizer setup
+**Want to see how it works without installing anything?** Check out the **[Live Trace Visualizer](https://ilyarice.github.io/Enterprise-RAG-Challenge-3-AI-Agents/)** - open it, hit the Demos tab, pick a trace, and explore the execution tree. You'll see exactly how the agent thinks and what it does at each step.
+
+**[Installation Guide](docs/installation.md)** - Setup instructions, API configuration, and trace visualizer setup (if you want to run the visualizer locally for whatever reason)
 
 ## Usage
 
@@ -118,7 +119,6 @@ Each sub-agent runs independently with its own set of relevant sdk tools and val
 - Langfuse tracing everywhere - super helpful for debugging
 - Task mode lets you run specific tasks by index - great for development
 - Custom trace export to JSON files with web-based visualizer for execution analysis
-- The visualizer includes demo traces - just run `cd trace-viewer && npm install && npm run dev` and click the "Demos" tab to study agent behavior without any API keys or Python setup
 - Consistency testing: run the same tasks multiple times and get distribution graph
 - Lots of parallel execution for speed
 - Hybrid BM25 + Fuzzy Wiki Search is implemented but not actually used (didn't get around to it)

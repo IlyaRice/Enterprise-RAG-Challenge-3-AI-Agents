@@ -66,11 +66,22 @@ python main.py erc3-dev --tasks 1 -v
 
 Expected output: Task execution with detailed logs (verbose mode), ending with score and completion message.
 
-## Trace Visualizer Setup (Optional)
+## Trace Visualizer
 
-The repository includes an interactive web-based tool for visualizing agent execution traces.
+### Live Version (No Setup)
 
-### Installation
+**[Open the visualizer](https://ilyarice.github.io/Enterprise-RAG-Challenge-3-AI-Agents/)** - runs in your browser, no installation needed.
+
+The visualizer has three tabs in the left sidebar:
+- **Tasks** - View the execution tree and details for the current trace
+- **Demos** - Pre-loaded demo traces
+- **Files** - Browse traces from your local `traces/` folder or upload individual files
+
+### Local Setup (Optional)
+
+Only needed if you want to modify the visualizer code or keep everything offline.
+
+#### Installation
 
 ```bash
 cd trace-viewer
@@ -85,8 +96,3 @@ npm run dev
 ```
 
 Open http://localhost:3000 in your browser.
-
-The visualizer has three tabs in the left sidebar:
-- **Tasks** - View the execution tree and details for the current trace
-- **Demos** - Pre-loaded demo traces
-- **Files** - Browse traces from your local `traces/` folder or upload individual files
