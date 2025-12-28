@@ -5,7 +5,7 @@ import RunHeader from "./components/RunHeader";
 import TaskSidebar from "./components/TaskSidebar";
 import { TraceEvent, RunResult } from "./types";
 import { normalizeTraceEvents, buildValidatorLookup } from "./utils";
-import sampleData from "./samples/sample_trace_new.json";
+import sampleData from "./samples/store benchmark agent traces demo.json";
 
 const App: React.FC = () => {
   // Initialize with sample data
@@ -65,7 +65,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-neutral-950 text-neutral-200">
-      <RunHeader meta={data.meta} onDataLoaded={handleDataLoaded} />
+      <RunHeader meta={data.meta} />
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar - Task List */}

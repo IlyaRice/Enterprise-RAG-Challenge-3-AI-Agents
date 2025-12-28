@@ -118,6 +118,7 @@ Each sub-agent runs independently with its own set of relevant sdk tools and val
 - Langfuse tracing everywhere - super helpful for debugging
 - Task mode lets you run specific tasks by index - great for development
 - Custom trace export to JSON files with web-based visualizer for execution analysis
+- The visualizer includes demo traces - just run `cd trace-viewer && npm install && npm run dev` and click the "Demos" tab to study agent behavior without any API keys or Python setup
 - Consistency testing: run the same tasks multiple times and get distribution graph
 - Lots of parallel execution for speed
 - Hybrid BM25 + Fuzzy Wiki Search is implemented but not actually used (didn't get around to it)

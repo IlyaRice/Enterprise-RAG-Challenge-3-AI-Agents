@@ -1,41 +1,12 @@
-import React, { useRef } from "react";
-import { RunMeta, RunResult } from "../types";
-import { Upload, Cpu, Target, TrendingUp } from "lucide-react";
+import React from "react";
+import { RunMeta } from "../types";
+import { Cpu, Target, TrendingUp } from "lucide-react";
 
 interface RunHeaderProps {
   meta: RunMeta;
-  onDataLoaded: (data: RunResult) => void;
 }
 
-const RunHeader: React.FC<RunHeaderProps> = ({ meta, onDataLoaded }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = JSON.parse(e.target?.result as string);
-        // Validate new format
-        if (json.results && Array.isArray(json.results) && json.meta) {
-          onDataLoaded(json as RunResult);
-        } else {
-          alert("Invalid file format: expected RunResult with 'results' array and 'meta' object.");
-        }
-      } catch (error) {
-        console.error("Error parsing JSON:", error);
-        alert("Failed to parse JSON file.");
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = "";
-  };
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+const RunHeader: React.FC<RunHeaderProps> = ({ meta }) => {
 
   return (
     <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-3 flex items-center justify-between shadow-md z-10 relative">
@@ -70,23 +41,6 @@ const RunHeader: React.FC<RunHeaderProps> = ({ meta, onDataLoaded }) => {
         />
       </div>
 
-      {/* Right: Upload button */}
-      <div>
-        <input
-          type="file"
-          accept=".json"
-          ref={fileInputRef}
-          className="hidden"
-          onChange={handleFileChange}
-        />
-        <button
-          onClick={handleUploadClick}
-          className="flex items-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 transition-colors text-sm font-medium"
-        >
-          <Upload className="w-4 h-4" />
-          Upload Run
-        </button>
-      </div>
     </div>
   );
 };

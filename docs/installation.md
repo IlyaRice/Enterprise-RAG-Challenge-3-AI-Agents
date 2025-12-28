@@ -84,6 +84,9 @@ cd trace-viewer
 npm run dev
 ```
 
-Open http://localhost:3000 in your browser. 
+Open http://localhost:3000 in your browser.
 
-**Browser compatibility:** The directory picker feature requires Chrome, Edge, or Opera. If you're using a different browser, use the "Upload Run" button in the header to load individual trace JSON files from the `traces/` directory.
+The visualizer has three tabs in the left sidebar:
+- **Tasks** - View the execution tree and details for the current trace
+- **Demos** - Pre-loaded demo traces
+- **Files** - Browse traces from your local `traces/` folder or upload individual files

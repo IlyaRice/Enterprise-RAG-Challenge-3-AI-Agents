@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { FolderOpen, FileJson, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { FolderOpen, FileJson, AlertCircle, Loader2, RefreshCw, Upload } from "lucide-react";
 import { RunResult } from "../types";
 
 interface FileInfo {
@@ -38,6 +38,7 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check if File System Access API is supported
   const isSupported = typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -206,28 +207,87 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
     });
   };
 
-  // Unsupported browser message
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsLoadingFile(file.name);
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        if (json.results && Array.isArray(json.results) && json.meta) {
+          onFileLoaded(json as RunResult, file.name);
+        } else {
+          setError("Invalid file format: expected RunResult with 'results' array and 'meta' object.");
+        }
+      } catch (error: any) {
+        setError(`Failed to parse JSON: ${error.message}`);
+        console.error("Error parsing JSON:", error);
+      } finally {
+        setIsLoadingFile(null);
+      }
+    };
+    reader.onerror = () => {
+      setError("Failed to read file");
+      setIsLoadingFile(null);
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  };
+
+  // Unsupported browser - show upload button
   if (!isSupported) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-        <AlertCircle className="w-10 h-10 text-amber-500 mb-3" />
-        <p className="text-sm text-neutral-300 mb-2">
-          File System Access API is not supported in this browser.
+        {/* Upload button */}
+        <input
+          type="file"
+          accept=".json"
+          ref={fileInputRef}
+          className="hidden"
+          onChange={handleFileUpload}
+        />
+        <button
+          onClick={handleUploadClick}
+          disabled={isLoadingFile !== null}
+          className="flex items-center gap-2 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 
+                     rounded-lg transition-colors text-sm text-neutral-200 disabled:opacity-50"
+        >
+          {isLoadingFile ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Upload className="w-4 h-4" />
+          )}
+          Upload Trace
+        </button>
+        
+        <p className="text-xs text-neutral-600 mt-4 max-w-xs">
+          Tip: Chrome, Edge, or Opera support folder browsing to avoid opening files one by one
         </p>
-        <p className="text-xs text-neutral-500">
-          Please use Chrome, Edge, or Opera. Alternatively, use the file upload button in the header.
-        </p>
+        
+        {error && (
+          <div className="mt-4 px-4 py-2 bg-rose-950/30 border border-rose-900/50 rounded">
+            <p className="text-xs text-rose-400">{error}</p>
+          </div>
+        )}
       </div>
     );
   }
 
-  // No folder selected yet
+  // No folder selected yet - show folder select and upload options
   if (!dirHandle) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 gap-4">
         <button
           onClick={handleSelectFolder}
-          disabled={isLoading}
+          disabled={isLoading || isLoadingFile !== null}
           className="flex items-center gap-2 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 
                      rounded-lg transition-colors text-sm text-neutral-200 disabled:opacity-50"
         >
@@ -238,10 +298,44 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
           )}
           Select Folder
         </button>
-        <p className="text-xs text-neutral-500 mt-3 text-center">
+        <p className="text-xs text-neutral-500 text-center">
           Navigate to the <span className="font-mono text-neutral-400">traces/</span> folder<br />
           in your project directory
         </p>
+        
+        <div className="flex items-center gap-3 w-full max-w-xs">
+          <div className="flex-1 h-px bg-neutral-800"></div>
+          <span className="text-xs text-neutral-500 uppercase">or</span>
+          <div className="flex-1 h-px bg-neutral-800"></div>
+        </div>
+        
+        {/* Upload button */}
+        <input
+          type="file"
+          accept=".json"
+          ref={fileInputRef}
+          className="hidden"
+          onChange={handleFileUpload}
+        />
+        <button
+          onClick={handleUploadClick}
+          disabled={isLoading || isLoadingFile !== null}
+          className="flex items-center gap-2 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 
+                     rounded-lg transition-colors text-sm text-neutral-200 disabled:opacity-50"
+        >
+          {isLoadingFile ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Upload className="w-4 h-4" />
+          )}
+          Upload Trace
+        </button>
+        
+        {error && (
+          <div className="mt-2 px-4 py-2 bg-rose-950/30 border border-rose-900/50 rounded">
+            <p className="text-xs text-rose-400">{error}</p>
+          </div>
+        )}
       </div>
     );
   }

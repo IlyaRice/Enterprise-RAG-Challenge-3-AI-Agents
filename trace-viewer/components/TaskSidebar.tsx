@@ -13,10 +13,20 @@ import {
   FolderOpen,
   List,
   Folder,
+  PlayCircle,
 } from "lucide-react";
 import FileBrowser, { FileInfo } from "./FileBrowser";
 
-type SidebarTab = "tasks" | "files";
+// Import demo traces
+import storeDemo from "../samples/store benchmark agent traces demo.json";
+import erc3Demo from "../samples/erc3-dev benchmark agent traces demo.json";
+
+type SidebarTab = "tasks" | "files" | "demos";
+
+const DEMO_TRACES = [
+  { id: "store", name: "Store Benchmark", description: "Multi-agent orchestrator with specialized sub-agents", data: storeDemo },
+  { id: "erc3", name: "ERC3-Dev Benchmark", description: "Plan ReAct agent with step validation", data: erc3Demo },
+];
 
 interface TaskSidebarProps {
   tasks: TaskResult[];
@@ -45,6 +55,7 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [folderName, setFolderName] = useState<string>("");
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
+  const [selectedDemoIndex, setSelectedDemoIndex] = useState<number>(0);
 
   // Hover state for eval_logs tooltip (similar to TreeVisualizer)
   const [hoveredTask, setHoveredTask] = useState<{ task: TaskResult; x: number; y: number } | null>(null);
@@ -94,6 +105,19 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
             onSelectTask(prevIndex);
           }
         }
+      } else if (activeTab === "demos") {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          const nextIndex = Math.min(selectedDemoIndex + 1, DEMO_TRACES.length - 1);
+          setSelectedDemoIndex(nextIndex);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          const prevIndex = Math.max(selectedDemoIndex - 1, 0);
+          setSelectedDemoIndex(prevIndex);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          handleDemoLoad(selectedDemoIndex);
+        }
       } else if (activeTab === "files" && files.length > 0) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -116,7 +140,7 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab, selectedTaskIndex, tasks.length, onSelectTask, files, selectedFileIndex]);
+  }, [activeTab, selectedTaskIndex, tasks.length, onSelectTask, files, selectedFileIndex, selectedDemoIndex]);
 
   const handleFileLoaded = async (fileInfo: FileInfo) => {
     try {
@@ -127,6 +151,12 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
     } catch (e) {
       console.error("Failed to load file:", e);
     }
+  };
+
+  const handleDemoLoad = (demoIndex: number) => {
+    setSelectedDemoIndex(demoIndex);
+    onFileLoaded(DEMO_TRACES[demoIndex].data as RunResult);
+    setActiveTab("tasks"); // Switch to tasks tab after loading
   };
 
   const getStatusIcon = (code: TaskResult["code"]) => {
@@ -157,7 +187,7 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
 
   const handleFileLoadedFromBrowser = (data: RunResult, _fileName: string) => {
     onFileLoaded(data);
-    // Keep user on Files tab for quick file browsing
+    setActiveTab("tasks"); // Switch to tasks tab after loading
   };
 
   // Collapsed state - just show toggle button
@@ -191,6 +221,17 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
           >
             <List className="w-3.5 h-3.5" />
             Tasks
+          </button>
+          <button
+            onClick={() => setActiveTab("demos")}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === "demos"
+                ? "bg-neutral-800 text-neutral-200"
+                : "text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50"
+            }`}
+          >
+            <PlayCircle className="w-3.5 h-3.5" />
+            Demos
           </button>
           <button
             onClick={() => setActiveTab("files")}
@@ -330,6 +371,42 @@ const TaskSidebar: React.FC<TaskSidebarProps> = ({
             })}
           </div>
         </>
+      ) : activeTab === "demos" ? (
+        /* Demos Tab */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-800 bg-neutral-900/50">
+            <p className="text-xs text-neutral-400">
+              Pre-loaded demo traces to explore agent behavior
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {DEMO_TRACES.map((demo, index) => (
+              <button
+                key={demo.id}
+                onClick={() => handleDemoLoad(index)}
+                className={`w-full text-left px-4 py-4 border-b border-neutral-800/50 
+                           transition-colors hover:bg-neutral-800/50
+                           border-l-2 ${
+                             index === selectedDemoIndex 
+                               ? 'border-l-blue-500 bg-neutral-800' 
+                               : 'border-l-transparent'
+                           }`}
+              >
+                <div className="flex items-start gap-3">
+                  <PlayCircle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-neutral-200 mb-1">
+                      {demo.name}
+                    </p>
+                    <p className="text-xs text-neutral-400 leading-relaxed">
+                      {demo.description}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         /* Files Tab */
         <FileBrowser 
