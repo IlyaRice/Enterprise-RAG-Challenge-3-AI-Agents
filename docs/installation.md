@@ -3,38 +3,87 @@
 ## Prerequisites
 - Python 3.12 or higher
 - pip (Python package installer)
+- ERC3 API key (get it at https://erc.timetoact-group.at/)
+- LLM provider API key (OpenRouter or Cerebras)
 
 ## Setup
-1. Clone the repository
+
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/IlyaRice/Enterprise-RAG-Challenge-3-AI-Agents.git
 cd Enterprise-RAG-Challenge-3-AI-Agents
 ```
 
-2. Create and activate a virtual environment
+### 2. Create Virtual Environment (Recommended)
 ```bash
-# On Windows
 python -m venv .venv
-.venv\Scripts\activate
-
-# On macOS/Linux
-python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate # or .venv\Scripts\activate on Windows
 ```
 
-3. Install dependencies
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-## Environment Configuration
-1. Create an `.env` file in the project root (copy from `.env.example`)
-```bash
-# On Windows
-copy .env.example .env
+## Configuration
 
-# On macOS/Linux
-cp .env.example .env
+### 1. Create Environment File
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env # or copy .env.example .env on Windows
 ```
 
-2. Edit the `.env` file with your API keys and configuration
+### 2. Configure API Keys
+
+Edit `.env` and set the following **required** variables:
+
+```bash
+# Required
+ERC3_API_KEY=your_erc3_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+LANGFUSE_TRACING_ENABLED=0
+```
+
+**Optional variables:**
+- `CEREBRAS_API_KEY` - Direct Cerebras API access (alternative to OpenRouter)
+- `USER_NAME` - Prefix for session names in dashboard
+- `LOCAL_DEV` - Set to `1` to prioritize .env over system environment
+- `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` - LLM observability setup
+
+### LLM Provider Notes
+
+**OpenRouter** (recommended): Works reliably for all tasks. Use this unless you have specific requirements.
+
+**Cerebras**: Direct API access needed if you want to use `reasoning_effort` parameter (ignored when routing through OpenRouter).
+
+## Verify Installation
+
+Test with a single task:
+```bash
+python main.py erc3-dev --tasks 1 -v
+```
+
+Expected output: Task execution with detailed logs (verbose mode), ending with score and completion message.
+
+## Trace Visualizer Setup (Optional)
+
+The repository includes an interactive web-based tool for visualizing agent execution traces.
+
+### Prerequisites
+- Node.js (v18 or higher)
+
+### Installation
+
+```bash
+cd trace-viewer
+npm install
+```
+
+### Usage
+
+```bash
+cd trace-viewer
+npm run dev
+```
+
+Open http://localhost:3000 and use the file browser to load trace files from the `traces/` directory.
