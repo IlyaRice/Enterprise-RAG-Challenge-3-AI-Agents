@@ -1,5 +1,6 @@
 wiki/
 misc/
+traces/
 
 # Project specific ignores
 .cursor/

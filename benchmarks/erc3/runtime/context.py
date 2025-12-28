@@ -29,7 +29,7 @@ from erc3.erc3.dtos import (
     Req_WhoAmI, Req_GetEmployee, Req_GetCustomer, Req_GetProject, ProjectTeamFilter,
     Req_ListEmployees, Req_SearchCustomers, Req_SearchProjects, Req_SearchTimeEntries,
 )
-from infrastructure import dispatch_with_retry, call_llm, TaskContext
+from infrastructure import dispatch_with_retry, call_llm, TaskContext, create_trace_event
 
 from .prompts import ContextSelection, prompt_context_builder
 import config
@@ -1040,6 +1040,7 @@ def run_context_builder(
     task_text: str,
     collected: CollectedContext,
     task_ctx: TaskContext = None,
+    trace: List[dict] = None,
     **_lf: Any,  # Langfuse kwargs for thread context propagation
 ) -> List[str]:
     """
@@ -1049,6 +1050,7 @@ def run_context_builder(
         task_text: The user's task text
         collected: CollectedContext from collect_context_blocks()
         task_ctx: TaskContext for logging LLM usage
+        trace: Trace list to append event to (optional)
     
     Returns:
         List of selected block names (empty for public users)
@@ -1094,6 +1096,21 @@ def run_context_builder(
         
         # Filter to only valid block names
         valid_blocks = [b for b in parsed.selected_blocks if b in collected.blocks]
+        
+        # Save to trace as node "0" (preprocessing step)
+        if trace is not None:
+            trace.append(create_trace_event(
+                node_id="0",
+                parent_node_id="-1",
+                sibling_index=0,
+                context="ContextBuilder",
+                system_prompt=prompt_context_builder,
+                input_messages=[{"role": "user", "content": user_message}],
+                output=llm_result["output"],
+                reasoning=llm_result["reasoning"],
+                timing=llm_result["timing"],
+                event_type="context_selection",
+            ))
         
         return valid_blocks
         

@@ -153,7 +153,8 @@ examples:
         print(f"Creating session in dashboard...")
         print(f"{'='*60}\n")
         result = create_and_run_session(
-            benchmark=args.benchmark
+            benchmark=args.benchmark,
+            export_path="traces"
         )
     else:
         # Task mode
@@ -167,7 +168,8 @@ examples:
         result = repeat_tasks(
             benchmark=args.benchmark,
             task_indices=task_indices,
-            num_times=args.runs
+            num_times=args.runs,
+            export_path="traces"
         )
     
     # Print summary

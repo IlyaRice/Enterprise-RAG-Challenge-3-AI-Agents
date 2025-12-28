@@ -16,7 +16,6 @@ if os.environ.get("LANGFUSE_TRACING_ENABLED") == "0":
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 ERC3_API_KEY = os.getenv("ERC3_API_KEY")
-TRACES_EXPORT_PATH = os.getenv("TRACES_EXPORT_PATH")
 
 # User/agent identification
 USER_NAME = os.getenv("USER_NAME")  # Optional: Add your name to prefix session names

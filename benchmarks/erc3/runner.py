@@ -204,6 +204,7 @@ def run_erc3_benchmark(erc_client: ERC3, task: TaskInfo) -> dict:
             task.task_text,
             collected,
             task_ctx,
+            trace,
             langfuse_trace_id=trace_id,
             langfuse_parent_observation_id=parent_obs_id,
         )
